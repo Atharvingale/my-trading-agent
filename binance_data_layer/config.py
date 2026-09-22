@@ -21,6 +21,20 @@ class Settings:
     trade_buffer_size: int = 500
     snapshot_interval_seconds: float = 5.0
     stale_after_seconds: float = 30.0
+    enable_market_breadth: bool = True
+    breadth_quote_assets: tuple[str, ...] = ("USDT", "USDC", "FDUSD")
+    breadth_top_n: int = 10
+    breadth_exclude_stablecoin_base: bool = True
+    enable_cross_exchange: bool = True
+    cross_exchange_max_age_seconds: float = 10.0
+    api_host: str = "127.0.0.1"
+    api_port: int = 8000
+    dynamic_universe_enabled: bool = True
+    dynamic_universe_size: int = 20
+    dynamic_min_quote_volume: float = 5_000_000.0
+    dynamic_refresh_seconds: float = 300.0
+    dynamic_excluded_symbols: tuple[str, ...] = ()
+    dynamic_symbol_pattern: str = r"^[A-Z0-9]{5,20}$"
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -43,4 +57,17 @@ class Settings:
             trade_buffer_size=max(10, int(os.getenv("TRADE_BUFFER_SIZE", cls.trade_buffer_size))),
             snapshot_interval_seconds=max(1.0, float(os.getenv("SNAPSHOT_INTERVAL", cls.snapshot_interval_seconds))),
             stale_after_seconds=max(5.0, float(os.getenv("STALE_AFTER_SECONDS", cls.stale_after_seconds))),
+            enable_market_breadth=os.getenv("ENABLE_MARKET_BREADTH", "1").lower() not in {"0", "false", "no"},
+            breadth_quote_assets=tuple(item.strip().upper() for item in os.getenv("BREADTH_QUOTE_ASSETS", ",".join(cls.breadth_quote_assets)).split(",") if item.strip()),
+            breadth_top_n=max(1, int(os.getenv("BREADTH_TOP_N", cls.breadth_top_n))),
+            breadth_exclude_stablecoin_base=os.getenv("BREADTH_EXCLUDE_STABLECOIN_BASE", "1").lower() not in {"0", "false", "no"},
+            enable_cross_exchange=os.getenv("ENABLE_CROSS_EXCHANGE", "1").lower() not in {"0", "false", "no"},
+            cross_exchange_max_age_seconds=max(1.0, float(os.getenv("CROSS_EXCHANGE_MAX_AGE_SECONDS", cls.cross_exchange_max_age_seconds))),
+            api_host=os.getenv("MARKET_DATA_API_HOST", cls.api_host),
+            api_port=max(1, int(os.getenv("MARKET_DATA_API_PORT", cls.api_port))),
+            dynamic_universe_enabled=os.getenv("DYNAMIC_UNIVERSE_ENABLED", "1").lower() not in {"0", "false", "no"},
+            dynamic_universe_size=max(1, int(os.getenv("DYNAMIC_UNIVERSE_SIZE", cls.dynamic_universe_size))),
+            dynamic_min_quote_volume=max(0.0, float(os.getenv("DYNAMIC_MIN_QUOTE_VOLUME", cls.dynamic_min_quote_volume))),
+            dynamic_refresh_seconds=max(30.0, float(os.getenv("DYNAMIC_REFRESH_SECONDS", cls.dynamic_refresh_seconds))),
+            dynamic_excluded_symbols=tuple(item.strip().upper() for item in os.getenv("DYNAMIC_EXCLUDED_SYMBOLS", "").split(",") if item.strip()),
         )

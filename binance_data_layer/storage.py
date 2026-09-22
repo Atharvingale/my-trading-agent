@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -30,6 +31,11 @@ CREATE TABLE IF NOT EXISTS feature_snapshots (
 );
 CREATE INDEX IF NOT EXISTS idx_features_symbol_time
     ON feature_snapshots(symbol, created_time_ms);
+CREATE TABLE IF NOT EXISTS breadth_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_time_ms INTEGER NOT NULL,
+    payload_json TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS data_health (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     component TEXT NOT NULL,
@@ -77,6 +83,13 @@ class MarketStore:
             (symbol, event_time, created_time_ms, payload_json)
             VALUES (?, ?, ?, ?)""",
             (snapshot["symbol"], snapshot["event_time"], created_time_ms, json.dumps(dict(snapshot), separators=(",", ":"))),
+        )
+        self.connection.commit()
+
+    def save_breadth(self, snapshot: Mapping[str, Any], created_time_ms: int | None = None) -> None:
+        self.connection.execute(
+            "INSERT INTO breadth_snapshots (created_time_ms, payload_json) VALUES (?, ?)",
+            (int(created_time_ms if created_time_ms is not None else time.time() * 1000), json.dumps(dict(snapshot), separators=(",", ":"))),
         )
         self.connection.commit()
 

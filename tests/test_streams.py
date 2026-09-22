@@ -6,6 +6,7 @@ def test_spot_and_futures_streams_are_separate():
     collector = BinanceCollector(Settings(symbols=("BTCUSDT",)))
 
     assert collector.spot_streams() == [
+        "!miniTicker@arr",
         "btcusdt@aggTrade",
         "btcusdt@bookTicker",
         "btcusdt@depth20@100ms",
@@ -16,6 +17,7 @@ def test_spot_and_futures_streams_are_separate():
         "btcusdt@kline_4h",
     ]
     assert collector.futures_streams() == [
+        "!miniTicker@arr",
         "btcusdt@markPrice@1s",
         "!forceOrder@arr",
     ]

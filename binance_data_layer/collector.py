@@ -14,9 +14,13 @@ from typing import Any, Mapping
 import websockets
 
 from .binance_client import BinancePublicClient
+from .breadth import calculate_breadth, normalize_ticker_array, rank_trending_symbols
 from .config import Settings
+from .cross_exchange import PUBLIC_WS_URLS, build_confirmation, canonical_symbol, normalize_message, subscription_for
 from .features import build_feature_snapshot
+from .quality import QualityTracker
 from .storage import MarketStore
+from .technical import Candle, calculate_indicators, multi_timeframe_alignment
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +146,7 @@ class MarketState:
     asks: list[tuple[float, float]] = field(default_factory=list)
     recent_trades: deque[dict[str, Any]] = field(init=False)
     last_event_time_ms: int | None = None
+    candles: dict[str, deque[dict[str, Any]]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.recent_trades = deque(maxlen=self.trade_buffer_size)
@@ -158,6 +163,9 @@ class MarketState:
             self.apply_depth(payload)
         elif event_type == "markPriceUpdate":
             self.last_price = payload.get("mark_price", self.last_price)
+        elif event_type == "kline" and payload.get("closed"):
+            interval = str(payload.get("interval", ""))
+            self.candles.setdefault(interval, deque(maxlen=500)).append(dict(payload))
 
     def apply_trade(self, payload: Mapping[str, Any]) -> None:
         self.last_price = float(payload["price"])
@@ -189,7 +197,16 @@ class MarketState:
             (self.last_event_time_ms or int(time.time() * 1000)) / 1000,
             tz=timezone.utc,
         )
-        return build_feature_snapshot(
+        technical = {
+            interval: calculate_indicators([
+                Candle(
+                    int(c["open_time_ms"]), float(c["open"]), float(c["high"]),
+                    float(c["low"]), float(c["close"]), float(c["volume"]), True,
+                ) for c in candles
+            ]) for interval, candles in self.candles.items()
+        }
+        alignment = multi_timeframe_alignment(technical)
+        snapshot = build_feature_snapshot(
             symbol=self.symbol,
             event_time=event_time,
             last_price=self.last_price,
@@ -200,7 +217,11 @@ class MarketState:
             recent_trades=self.recent_trades,
             bids=self.bids,
             asks=self.asks,
+            technical=technical,
         )
+        snapshot["multi_timeframe_alignment"] = alignment
+        return snapshot
+
 
 
 class BinanceCollector:
@@ -212,21 +233,33 @@ class BinanceCollector:
             for symbol in self.settings.symbols
         }
         self._stop = asyncio.Event()
+        self.quality = QualityTracker(stale_after_ms=int(self.settings.stale_after_seconds * 1000))
+        self.cross_exchange_snapshots: dict[str, list[dict[str, Any]]] = {}
+        self.realtime_api: Any | None = None
+        self.active_symbols: tuple[str, ...] = tuple(self.settings.symbols)
+        self.universe_rows: list[dict[str, Any]] = []
+        self.universe_generation = 0
+        self.universe_last_update_ms = 0
 
     def stop(self) -> None:
         self._stop.set()
 
     def spot_streams(self) -> list[str]:
         streams: list[str] = []
+        if self.settings.enable_market_breadth:
+            streams.append("!miniTicker@arr")
         intervals = ("1m", "5m", "15m", "1h", "4h")
-        for symbol in self.settings.symbols:
+        for symbol in self.active_symbols:
             lower = symbol.lower()
             streams.extend((f"{lower}@aggTrade", f"{lower}@bookTicker", f"{lower}@depth20@100ms"))
             streams.extend(f"{lower}@kline_{interval}" for interval in intervals)
         return streams
 
     def futures_streams(self) -> list[str]:
-        return [*(f"{symbol.lower()}@markPrice@1s" for symbol in self.settings.symbols), "!forceOrder@arr"]
+        streams = [*(f"{symbol.lower()}@markPrice@1s" for symbol in self.active_symbols), "!forceOrder@arr"]
+        if self.settings.enable_market_breadth:
+            streams.insert(0, "!miniTicker@arr")
+        return streams
 
     def spot_stream_url(self) -> str:
         return f"{self.settings.spot_ws_url}?streams={'/'.join(self.spot_streams())}"
@@ -240,6 +273,79 @@ class BinanceCollector:
 
     def streams(self) -> list[str]:
         return [*self.spot_streams(), *self.futures_streams()]
+
+    def cross_exchange_sources(self) -> tuple[str, ...]:
+        return tuple(PUBLIC_WS_URLS) if self.settings.enable_cross_exchange else ()
+
+    def cross_exchange_urls(self) -> dict[str, str]:
+        return {source: PUBLIC_WS_URLS[source] for source in self.cross_exchange_sources()}
+
+    def cross_exchange_subscriptions(self) -> dict[str, dict[str, Any]]:
+        return {source: subscription_for(source) for source in self.cross_exchange_sources()}
+
+    def _record_cross_exchange_snapshot(self, snapshot: Mapping[str, Any]) -> None:
+        symbol = str(snapshot["symbol"])
+        entries = [row for row in self.cross_exchange_snapshots.get(symbol, []) if row.get("source") != snapshot.get("source") and row.get("source") != "binance"]
+        entries.append(dict(snapshot))
+        state = self.states.get(symbol)
+        if state is not None and state.last_price is not None and state.last_event_time_ms is not None:
+            entries.append({"source": "binance", "symbol": symbol, "mid_price": state.last_price, "received_time_ms": int(time.time() * 1000)})
+        self.cross_exchange_snapshots[symbol] = entries
+        confirmation = build_confirmation(
+            entries,
+            now_ms=int(time.time() * 1000),
+            max_age_ms=int(self.settings.cross_exchange_max_age_seconds * 1000),
+        )
+        now_ms = int(time.time() * 1000)
+        self.store.save_event(
+            stream="cross_exchange:derived",
+            symbol=symbol,
+            event_type="crossExchangeConfirmation",
+            event_time_ms=now_ms,
+            received_time_ms=now_ms,
+            payload=confirmation,
+        )
+        if self.realtime_api is not None:
+            asyncio.create_task(self.realtime_api.publish({
+                "type": "cross_exchange_confirmation",
+                "symbol": symbol,
+                "event_time_ms": now_ms,
+                "payload": confirmation,
+            }))
+
+    async def _run_cross_exchange(self, source: str) -> None:
+        delay = 1.0
+        url = PUBLIC_WS_URLS[source]
+        while not self._stop.is_set():
+            try:
+                async with websockets.connect(url, ping_interval=20, ping_timeout=20, close_timeout=1) as socket:
+                    await socket.send(json.dumps(subscription_for(source)))
+                    delay = 1.0
+                    self.store.save_health(component=f"cross_exchange_{source}", symbol=None, status="connected", observed_time_ms=int(time.time() * 1000), details={"url": url})
+                    while not self._stop.is_set():
+                        try:
+                            raw = await asyncio.wait_for(socket.recv(), timeout=1.0)
+                        except asyncio.TimeoutError:
+                            continue
+                        if raw is None:
+                            break
+                        for snapshot in normalize_message(source, json.loads(raw)):
+                            snapshot["symbol"] = canonical_symbol(source, snapshot["symbol"])
+                            received = int(time.time() * 1000)
+                            self.store.save_event(
+                                stream=f"cross_exchange:{source}", symbol=snapshot["symbol"], event_type="ticker",
+                                event_time_ms=received, received_time_ms=received, payload=snapshot,
+                            )
+                            self._record_cross_exchange_snapshot(snapshot)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self.store.save_health(component=f"cross_exchange_{source}", symbol=None, status="error", observed_time_ms=int(time.time() * 1000), details={"error": repr(exc), "retry_seconds": delay})
+                try:
+                    await asyncio.wait_for(self._stop.wait(), timeout=delay)
+                except asyncio.TimeoutError:
+                    pass
+                delay = min(delay * 2, 60.0)
 
     async def collect_binance_analytics_once(self, client: BinancePublicClient | Any | None = None) -> None:
         """Persist Binance-provided market analytics without placing orders."""
@@ -474,23 +580,118 @@ class BinanceCollector:
             payload=event["payload"],
         )
 
+    def _update_dynamic_universe(self, rows: list[dict[str, Any]]) -> None:
+        now_ms = int(time.time() * 1000)
+        if now_ms - self.universe_last_update_ms < int(self.settings.dynamic_refresh_seconds * 1000):
+            return
+        self.universe_last_update_ms = now_ms
+        self.universe_rows = rows
+        if not self.settings.dynamic_universe_enabled:
+            return
+        selected = rank_trending_symbols(
+            rows,
+            pinned=self.settings.symbols,
+            top_n=self.settings.dynamic_universe_size,
+            min_quote_volume=self.settings.dynamic_min_quote_volume,
+            excluded_symbols=self.settings.dynamic_excluded_symbols,
+            symbol_pattern=self.settings.dynamic_symbol_pattern,
+        )
+        added = [symbol for symbol in selected if symbol not in self.states]
+        for symbol in added:
+            self.states[symbol] = MarketState(symbol, self.settings.trade_buffer_size)
+        if selected != self.active_symbols:
+            self.universe_generation += 1
+            self.active_symbols = selected
+        if self.realtime_api is not None:
+            asyncio.create_task(self.realtime_api.publish({
+                "type": "universe_update",
+                "symbols": list(selected),
+                "rows": rows,
+                "generation": self.universe_generation,
+                "timestamp_ms": int(time.time() * 1000),
+            }))
+
+    def _save_breadth_message(self, stream: str, message: Mapping[str, Any]) -> None:
+        payload = message.get("data", message)
+        rows = normalize_ticker_array(message, quote_assets=set(self.settings.breadth_quote_assets))
+        self._update_dynamic_universe(rows)
+        if self.settings.breadth_exclude_stablecoin_base:
+            stable_bases = {"USDT", "USDC", "FDUSD", "TUSD", "USDP", "DAI", "BUSD"}
+            rows = [
+                row for row in rows
+                if all(
+                    not (row["symbol"].endswith(quote) and row["symbol"][:-len(quote)] in stable_bases)
+                    for quote in self.settings.breadth_quote_assets
+                )
+            ]
+        snapshot = calculate_breadth(rows, top_n=self.settings.breadth_top_n)
+        now_ms = int(time.time() * 1000)
+        self.store.save_event(
+            stream=stream,
+            symbol="",
+            event_type="marketBreadthTicker",
+            event_time_ms=int(snapshot["timestamp_ms"]),
+            received_time_ms=now_ms,
+            payload=payload if isinstance(payload, dict) else {"items": payload},
+        )
+        self.store.save_breadth(snapshot, created_time_ms=now_ms)
+        if self.realtime_api is not None:
+            asyncio.create_task(self.realtime_api.publish({
+                "type": "breadth",
+                "event_time_ms": snapshot["timestamp_ms"],
+                "payload": snapshot,
+            }))
+
     async def _handle_message(self, raw_message: str | bytes) -> None:
         message = json.loads(raw_message)
         stream = str(message.get("stream", ""))
+        if stream in {"!miniTicker@arr", "!ticker@arr"}:
+            self._save_breadth_message(stream, message)
+            return
         payload = message.get("data", message)
         event = normalize_event(stream, payload)
         symbol = event["symbol"]
+        event_payload = event["payload"]
+        quality = self.quality.observe(
+            "binance",
+            symbol,
+            event["event_type"],
+            int(event["event_time_ms"]),
+            int(time.time() * 1000),
+            event_id=event_payload.get("trade_id"),
+            first_update_id=event_payload.get("first_update_id"),
+            final_update_id=event_payload.get("final_update_id"),
+        )
+        if quality.status != "GOOD":
+            self.store.save_health(
+                component="binance_data_quality",
+                symbol=symbol,
+                status=quality.status,
+                observed_time_ms=int(time.time() * 1000),
+                details={"event_type": event["event_type"], "reasons": list(quality.reasons)},
+            )
         if symbol in self.states:
             self.states[symbol].apply(event)
         self._save_normalized(event)
 
-        if symbol in self.states and event["event_type"] in {"aggTrade", "bookTicker", "depthUpdate", "markPriceUpdate"}:
+        if self.realtime_api is not None:
+            await self.realtime_api.publish({
+                "type": "market_event",
+                "stream": event["stream"],
+                "symbol": symbol,
+                "event_type": event["event_type"],
+                "event_time_ms": event["event_time_ms"],
+                "payload": event["payload"],
+            })
+
+        if symbol in self.states and event["event_type"] in {"aggTrade", "bookTicker", "depthUpdate", "markPriceUpdate", "kline"}:
             self.store.save_features(self.states[symbol].features(), int(time.time() * 1000))
 
     async def _run_socket(self, *, venue: str, stream_url: str) -> None:
         delay = 1.0
         while not self._stop.is_set():
             try:
+                stream_url = self.spot_stream_url() if venue == "spot" else self.futures_stream_url()
                 logger.info("Connecting to Binance %s streams: %s", venue, stream_url)
                 async with websockets.connect(
                     stream_url,
@@ -506,6 +707,7 @@ class BinanceCollector:
                         observed_time_ms=int(time.time() * 1000),
                         details={"url": stream_url},
                     )
+                    connection_generation = self.universe_generation
                     while not self._stop.is_set():
                         try:
                             message = await asyncio.wait_for(socket.recv(), timeout=1.0)
@@ -514,6 +716,8 @@ class BinanceCollector:
                         if message is None:
                             break
                         await self._handle_message(message)
+                        if self.universe_generation != connection_generation:
+                            break
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # reconnect boundary: record and continue
@@ -682,12 +886,35 @@ class BinanceCollector:
                     pass
                 delay = min(delay * 2, 300.0)
 
+    async def _run_api(self) -> None:
+        from aiohttp import web
+        from .api import create_app
+
+        app = create_app(self)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, self.settings.api_host, self.settings.api_port)
+        await site.start()
+        self.store.save_health(
+            component="local_api",
+            symbol=None,
+            status="connected",
+            observed_time_ms=int(time.time() * 1000),
+            details={"host": self.settings.api_host, "port": self.settings.api_port},
+        )
+        try:
+            await self._stop.wait()
+        finally:
+            await runner.cleanup()
+
     async def run(self) -> None:
         tasks = [
+            asyncio.create_task(self._run_api()),
             asyncio.create_task(self._run_socket(venue="spot", stream_url=self.spot_stream_url())),
             asyncio.create_task(self._run_socket(venue="futures", stream_url=self.futures_stream_url())),
             asyncio.create_task(self._run_futures_metrics()),
             asyncio.create_task(self._run_binance_analytics()),
+            *[asyncio.create_task(self._run_cross_exchange(source)) for source in self.cross_exchange_sources()],
             asyncio.create_task(self._run_private_account()),
             asyncio.create_task(self._run_private_user_stream("spot")),
             asyncio.create_task(self._run_private_user_stream("futures")),
