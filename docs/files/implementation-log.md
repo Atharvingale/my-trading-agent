@@ -319,3 +319,16 @@ No spec covers Step 1 (it was a decision-point probe, not a numbered module). St
 **Open questions / follow-ups:**
 Detailed record: `research/reports/STEP1_DAILY_PROBE_AND_PAPER.md`. The adjacent-space premise did not confirm — reserved for Atharva per the pending project-level decision.
 
+---
+
+### [Finding] Edge-Validation Research Close-Out — 2026-09-24 (on `experiments/research-track`)
+
+**What was implemented:**
+Wrote `research/PROJECT_FINDING.md`: one-page dated close-out of the research phase. States scope (6 hourly families + 1 daily probe, gate criteria applied), results table (7 rows, 0 PASS, daily n=8 flagged as thin sample), cost-attribution finding (pre-cost near-zero, TDS dominant drain on flat signals), explicit burned-vs-untouched holdout budget, three paths forward stated without recommendation ((a) cost-structure change marked out of scope, (b) funding-rate/cross-exchange new classes requiring fresh pre-commitment, (c) stop here), and the working infrastructure that remains regardless. Decision explicitly left to Atharva. No code, gate, or status changes.
+
+**How it differs from the spec (if at all):**
+No spec covers a finding document; this closes the loop the stopping rule required rather than opening new work.
+
+**Tests run:**
+Full suite 148 passed (nothing changed but the two added files). `git diff --check` clean (CRLF warnings only).
+
