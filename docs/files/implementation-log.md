@@ -298,3 +298,24 @@ No rigor divergence in either task. Task 1 touched no gate state and changed no 
 **Tests run:**
 Full suite 141 passed after both tasks (no production code changed). No Module 4 or Module 5 status changes; no strategy files added or wired.
 
+---
+
+### [Step 1] Cheap Manual Probe + Paper-Trading Support — 2026-09-24 (on `experiments/research-track`)
+
+**What was implemented (Part A — daily-trend probe, new hypothesis class):**
+Pre-registered hypothesis `252cba87-d4c2-4b37-9a7b-249902027e4b` for `daily_trend_following` (distinct family from hourly trend) on the untouched 2023-01-01–2024-01-01 BTCUSDT daily holdout before touching data: daily EMA(5)/EMA(20) crossover, next-daily-open execution, 2% stop first, 25% sizing; same 0.10%/31.2%/1%-TDS cost model, default parameters, no tuning. Fetched 365 daily candles (dataset `7618f158…`), four quarterly windows plus doubled-cost stress, bootstrap evidence (seed 20260924, 2,000 samples), disjoint half/half replication, verdict recorded append-only. `strategies/` untouched.
+
+**Probe result: FAIL (final, not retryable).** 8 trades (below 20 minimum), aggregate net `-1.0963%`, stress `-1.2977%`, bootstrap CI `[-3.2749%, -0.1505%]` entirely negative; windows `-1.68%`, `-1.44%`, `-1.27%`, `0.00%`; replication FAIL. All six acceptance items failed. Ledger: `daily_trend_following HYPOTHESIS/PENDING → RESULT/FAIL`, fingerprint `fa0dbbd6…`. Artifact: `research/reports/daily_trend_experiment.json`. Against the probe bar (flat-or-better pre-cost, non-entirely-negative CI, or one positive leg): clears nothing — no signs of life. The 2023 daily window is burned for this family.
+
+**What was implemented (Part B — paper-trading support):**
+New `paper_trading/` package (stdlib only): `simulator.py` (`PaperOrder` validated deterministic ids, `simulate_fill` with fee/adverse-slippage/depth-capped PARTIAL/empty-book REJECTED, `execution_report` expected-vs-realized), `portfolio.py` (`PaperPortfolio`, long-only v1, oversell raises, equity marks at cost on missing data), `engine.py` (`PaperEngine.submit`/`replay`/`equity`/`snapshot`). Offline, credential-free, no network imports. `tests/test_paper_trading.py`, 7 tests (exact fill math, partials, adverse slippage both sides, expected-vs-realized, round-trip + oversell rejection, deterministic replay, no-network-import scan).
+
+**How it differs from the spec (if at all):**
+No spec covers Step 1 (it was a decision-point probe, not a numbered module). Stopping-rule compliance: daily timeframe is an explicitly listed new class (different timeframe), so this run was permitted; hourly families remain closed.
+
+**Tests run:**
+`tests/test_paper_trading.py` 7 passed; full suite 148 passed (was 141). `python -m compileall -q paper_trading tests/test_paper_trading.py`; `git diff --check` clean (CRLF warnings only). No Module 4/5 changes.
+
+**Open questions / follow-ups:**
+Detailed record: `research/reports/STEP1_DAILY_PROBE_AND_PAPER.md`. The adjacent-space premise did not confirm — reserved for Atharva per the pending project-level decision.
+

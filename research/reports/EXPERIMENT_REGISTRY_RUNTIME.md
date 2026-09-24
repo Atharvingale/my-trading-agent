@@ -439,3 +439,76 @@ Outcome: PENDING — no results recorded yet.
 
 ---
 
+## Preregistered hypothesis — 2026-09-24T12:29:04.703253+00:00
+
+- Record ID: `252cba87-d4c2-4b37-9a7b-249902027e4b`
+- Strategy: `daily_trend_following` (family `daily_trend_following`)
+- Hypothesis: Causal daily long-only EMA trend following on BTCUSDT spot has positive net-of-cost-and-tax return on the untouched 2023-01-01 through 2024-01-01 daily holdout. Material difference vs the falsified hourly family: daily closes carry a higher signal-to-noise ratio, turnover is roughly an order of magnitude lower (directly addressing the 16-26% TDS turnover-drag finding), and neither daily data nor 2023 has been touched by any prior experiment. Entry: daily EMA(5) crossing above EMA(20) on a completed daily candle; execution at the next daily open with 0.10% adverse slippage; 25% of available cash per position. Exit priority on every held day: 2% stop-loss first, then EMA(5) below EMA(20) signal, else hold to end of data. Costs: 0.10% fee per side, 31.2% VDA tax on positive realized gains with no loss offset, 1% gross-proceeds TDS as a cash-flow drag. PASS bar (all required): at least 3 of 4 chronological windows positive net, aggregate net above zero, bootstrap confidence interval on mean per-trade net return excluding zero on the positive side, aggregate minus zero risk-free exceeding the CI width, doubled-cost stress net above zero, at least 20 trades, two regime legs reported, disjoint replication positive.
+- Holdout: 2023-01-01 through 2024-01-01
+- Requires independent replication: False
+- Materially new rationale: None
+- Pre-registered thresholds:
+
+```json
+{
+  "bootstrap_confidence": 0.9,
+  "minimum_trades": 20,
+  "risk_free_benchmark": "quote_hold",
+  "stress_multiplier": 2.0,
+  "windows": 4
+}
+```
+- Cost and tax assumptions:
+
+```json
+{
+  "fee_rate": 0.001,
+  "loss_offset_allowed": false,
+  "slippage_rate": 0.001,
+  "tax_rate": 0.312,
+  "tds_is_cash_flow_drag": true,
+  "tds_rate": 0.01
+}
+```
+
+Outcome: PENDING — no results recorded yet.
+
+---
+
+## Result — 2026-09-24T12:29:05.891300+00:00
+
+- Preregistration record ID: `252cba87-d4c2-4b37-9a7b-249902027e4b`
+- Verdict: **FAIL**
+- Evidence:
+
+```json
+{
+  "acceptance_checks": {
+    "fresh_holdout_for_strategy_family": true,
+    "independent_replication_when_refined": false,
+    "net_of_fees_slippage_and_vda_tax": true,
+    "null_result_recorded_without_retries": true,
+    "positive_bootstrap_confidence_interval": false,
+    "preregistered_before_holdout": true,
+    "two_structurally_different_regimes": true
+  },
+  "bootstrap_ci": [
+    -0.03274922000000005,
+    -0.0015045825856105349
+  ],
+  "evidence": {
+    "dataset_id": "binance-spot-BTCUSDT-1d-2023-01-01-2024-01-01",
+    "dataset_sha256": "7618f1584d928d4419d8d4b7651624a5dc7e11ecc42b3fdc1cca89aa267c1724",
+    "fingerprint": "fa0dbbd679f40bb3cd559c80d7482e71f70dedf28a3af27950f0937ebd04ea17",
+    "net_return": -0.020948983956344563
+  },
+  "regime_results": {
+    "range_bound": -0.014617986860698816,
+    "trending": 0.0
+  },
+  "replication_result": "FAIL"
+}
+```
+
+---
+

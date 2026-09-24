@@ -4,7 +4,7 @@ Update this table whenever work starts or finishes on a module. Keep it in sync 
 
 | # | Module | File | Status | Last updated |
 |---|---|---|---|---|
-| 1 | Edge Validation Gate | 01-edge-validation-gate.md | Done — all 4 candidates FAIL on real Binance holdouts (Trend Q1, Order Flow Q2, MeanRev Q3, VWAP Q4 16 trades); cost attribution filed; 6/6 families failed, pre-committed set complete; no strategy approved | 2026-09-24 |
+| 1 | Edge Validation Gate | 01-edge-validation-gate.md | Done — 6/6 families FAIL (4 hourly candidates + Breakout/Scalping falsified) plus Step 1 daily-trend probe FAIL (2023 daily, 8 trades); cost attribution filed; no strategy approved | 2026-09-24 |
 | 2 | Market Data Hardening | 02-market-data-hardening.md | Done — P0/P1/P2 fully closed; 24 hardening tests passing (wired async writer, tracked fan-out, token+TLS gate, 24h simulated soak, restart/recovery, periodic retention, authoritative universe, analytics split, feature cache, repo reads, shared client, centralized backoff); 116 total tests passing | 2026-09-24 |
 | 3 | Observer + Context Builder | 03-hermes-core-observer-context.md | Done — MarketContext + builder + observer live; 8 acceptance tests passing; 124 total tests passing | 2026-09-24 |
 | 4 | Strategy Proposal Layer | 04-strategy-layer.md | Blocked (no PASS verdict in gate — loader + proposal + calibration machinery ready and tested, zero strategies wired per hard rule) | 2026-09-24 |
