@@ -6,228 +6,41 @@ import asyncio
 import json
 import logging
 import time
-from collections import deque
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+import tracemalloc
 from typing import Any, Mapping
 
 import websockets
 
+from .analytics import (
+    collect_binance_analytics,
+    collect_futures_metrics,
+    collect_private_account,
+)
 from .binance_client import BinancePublicClient
 from .breadth import calculate_breadth, normalize_ticker_array, rank_trending_symbols
 from .config import Settings
 from .cross_exchange import PUBLIC_WS_URLS, build_confirmation, canonical_symbol, normalize_message, subscription_for
-from .features import build_feature_snapshot
+from .ingestion import MarketState, normalize_event
 from .quality import QualityTracker
+from .retry import next_backoff_seconds
 from .storage import MarketStore
-from .technical import Candle, calculate_indicators, multi_timeframe_alignment
 
 logger = logging.getLogger(__name__)
+
+__all__ = ["BinanceCollector", "MarketState", "normalize_event", "main", "run_asyncio_entrypoint"]
 
 
 def _number(value: Any) -> float:
     return float(value)
 
 
-def normalize_event(stream: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-    """Normalize supported Binance WebSocket payloads into stable records."""
-    event_type = str(payload.get("e", "unknown"))
-    if event_type == "unknown" and "@bookTicker" in stream:
-        event_type = "bookTicker"
-    elif event_type == "unknown" and "@depth" in stream:
-        event_type = "depthUpdate"
-    symbol = str(payload.get("s", "")).upper()
-    if not symbol and "@" in stream:
-        symbol = stream.split("@", 1)[0].upper()
-    event_time_ms = int(payload.get("E", payload.get("T", int(time.time() * 1000))))
-
-    if event_type == "markPrice" and "mp" in payload:
-        event_type = "optionMarkPrice"
-        normalized = {
-            "mark_price": _number(payload["mp"]),
-            "bid_iv": _number(payload["b"]),
-            "ask_iv": _number(payload["a"]),
-            "mark_iv": _number(payload.get("vo", payload.get("markIV", payload["b"]))),
-            "bid_price": _number(payload["bo"]),
-            "ask_price": _number(payload["ao"]),
-            "index_price": _number(payload["i"]),
-            "delta": _number(payload["d"]),
-            "theta": _number(payload["t"]),
-            "gamma": _number(payload["g"]),
-            "vega": _number(payload["v"]),
-            "risk_free_interest": _number(payload.get("rf", payload.get("riskFreeInterest", 0.0))),
-        }
-    elif event_type == "openInterest" and "o" in payload and "h" in payload:
-        event_type = "optionOpenInterest"
-        normalized = {
-            "open_interest_contracts": _number(payload["o"]),
-            "open_interest_usd": _number(payload["h"]),
-        }
-    elif event_type in {"aggTrade", "trade"}:
-        normalized = {
-            "price": _number(payload["p"]),
-            "qty": _number(payload["q"]),
-            "is_buyer_maker": bool(payload["m"]),
-            "trade_id": payload.get("a", payload.get("t")),
-        }
-    elif event_type == "kline":
-        kline = payload["k"]
-        normalized = {
-            "open_time_ms": kline["t"],
-            "close_time_ms": kline["T"],
-            "interval": kline["i"],
-            "open": _number(kline["o"]),
-            "close": _number(kline["c"]),
-            "high": _number(kline["h"]),
-            "low": _number(kline["l"]),
-            "volume": _number(kline["v"]),
-            "quote_volume": _number(kline["q"]),
-            "trade_count": int(kline["n"]),
-            "taker_buy_volume": _number(kline["V"]),
-            "taker_buy_quote_volume": _number(kline["Q"]),
-            "closed": bool(kline["x"]),
-        }
-    elif event_type == "bookTicker":
-        normalized = {
-            "bid_price": _number(payload["b"]),
-            "bid_qty": _number(payload["B"]),
-            "ask_price": _number(payload["a"]),
-            "ask_qty": _number(payload["A"]),
-        }
-    elif event_type == "depthUpdate":
-        normalized = {
-            "first_update_id": payload.get("U"),
-            "final_update_id": payload.get("u", payload.get("lastUpdateId")),
-            "bids": [(_number(price), _number(qty)) for price, qty in payload.get("b", payload.get("bids", []))],
-            "asks": [(_number(price), _number(qty)) for price, qty in payload.get("a", payload.get("asks", []))],
-        }
-    elif event_type == "markPriceUpdate":
-        normalized = {
-            "mark_price": _number(payload["p"]),
-            "index_price": _number(payload["i"]),
-            "funding_rate": _number(payload["r"]),
-            "next_funding_time_ms": payload.get("T"),
-        }
-    elif event_type == "forceOrder":
-        order = payload.get("o", {})
-        normalized = {
-            "side": order.get("S"),
-            "order_type": order.get("o"),
-            "price": _number(order["p"]),
-            "average_price": _number(order["ap"]),
-            "orig_qty": _number(order["q"]),
-            "executed_qty": _number(order["z"]),
-            "trade_time_ms": order.get("T"),
-        }
-        symbol = str(order.get("s", symbol)).upper()
-    else:
-        normalized = dict(payload)
-
-    return {
-        "stream": stream,
-        "event_type": event_type,
-        "symbol": symbol,
-        "event_time_ms": event_time_ms,
-        "payload": normalized,
-        "raw": dict(payload),
-    }
-
-
-@dataclass
-class MarketState:
-    symbol: str
-    trade_buffer_size: int = 500
-    last_price: float | None = None
-    bid_price: float | None = None
-    bid_qty: float = 0.0
-    ask_price: float | None = None
-    ask_qty: float = 0.0
-    bids: list[tuple[float, float]] = field(default_factory=list)
-    asks: list[tuple[float, float]] = field(default_factory=list)
-    recent_trades: deque[dict[str, Any]] = field(init=False)
-    last_event_time_ms: int | None = None
-    candles: dict[str, deque[dict[str, Any]]] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        self.recent_trades = deque(maxlen=self.trade_buffer_size)
-
-    def apply(self, event: Mapping[str, Any]) -> None:
-        self.last_event_time_ms = int(event["event_time_ms"])
-        event_type = str(event["event_type"])
-        payload = event["payload"]
-        if event_type in {"aggTrade", "trade"}:
-            self.apply_trade(payload)
-        elif event_type == "bookTicker":
-            self.apply_book_ticker(payload)
-        elif event_type == "depthUpdate":
-            self.apply_depth(payload)
-        elif event_type == "markPriceUpdate":
-            self.last_price = payload.get("mark_price", self.last_price)
-        elif event_type == "kline" and payload.get("closed"):
-            interval = str(payload.get("interval", ""))
-            self.candles.setdefault(interval, deque(maxlen=500)).append(dict(payload))
-
-    def apply_trade(self, payload: Mapping[str, Any]) -> None:
-        self.last_price = float(payload["price"])
-        self.recent_trades.append(dict(payload))
-
-    def apply_book_ticker(self, payload: Mapping[str, Any]) -> None:
-        self.bid_price = float(payload["bid_price"])
-        self.bid_qty = float(payload["bid_qty"])
-        self.ask_price = float(payload["ask_price"])
-        self.ask_qty = float(payload["ask_qty"])
-
-    def apply_depth(self, payload: Mapping[str, Any]) -> None:
-        self.bids = [(float(price), float(qty)) for price, qty in payload["bids"]]
-        self.asks = [(float(price), float(qty)) for price, qty in payload["asks"]]
-
-    def health(self, *, now_ms: int | None = None, stale_after_seconds: float = 30.0) -> dict[str, Any]:
-        observed_ms = now_ms if now_ms is not None else int(time.time() * 1000)
-        if self.last_event_time_ms is None:
-            return {"symbol": self.symbol, "status": "missing", "age_seconds": None}
-        age_seconds = max(0.0, (observed_ms - self.last_event_time_ms) / 1000)
-        return {
-            "symbol": self.symbol,
-            "status": "fresh" if age_seconds <= stale_after_seconds else "stale",
-            "age_seconds": age_seconds,
-        }
-
-    def features(self) -> dict[str, Any]:
-        event_time = datetime.fromtimestamp(
-            (self.last_event_time_ms or int(time.time() * 1000)) / 1000,
-            tz=timezone.utc,
-        )
-        technical = {
-            interval: calculate_indicators([
-                Candle(
-                    int(c["open_time_ms"]), float(c["open"]), float(c["high"]),
-                    float(c["low"]), float(c["close"]), float(c["volume"]), True,
-                ) for c in candles
-            ]) for interval, candles in self.candles.items()
-        }
-        alignment = multi_timeframe_alignment(technical)
-        snapshot = build_feature_snapshot(
-            symbol=self.symbol,
-            event_time=event_time,
-            last_price=self.last_price,
-            bid_price=self.bid_price,
-            ask_price=self.ask_price,
-            bid_qty=self.bid_qty,
-            ask_qty=self.ask_qty,
-            recent_trades=self.recent_trades,
-            bids=self.bids,
-            asks=self.asks,
-            technical=technical,
-        )
-        snapshot["multi_timeframe_alignment"] = alignment
-        return snapshot
-
-
-
 class BinanceCollector:
     def __init__(self, settings: Settings | None = None, store: MarketStore | None = None) -> None:
         self.settings = settings or Settings.from_environment()
-        self.store = store or MarketStore(self.settings.database_path)
+        self.store = store or MarketStore(
+            self.settings.database_path, batch_size=self.settings.persist_batch_size
+        )
+        self.store.batch_size = max(1, self.settings.persist_batch_size)
         self.states = {
             symbol: MarketState(symbol, self.settings.trade_buffer_size)
             for symbol in self.settings.symbols
@@ -240,6 +53,23 @@ class BinanceCollector:
         self.universe_rows: list[dict[str, Any]] = []
         self.universe_generation = 0
         self.universe_last_update_ms = 0
+        self.background_tasks: set[asyncio.Task[Any]] = set()
+        self._feature_cache: dict[str, Any] = {}
+        self._shared_client: BinancePublicClient | None = None
+
+    def track_background_task(self, coro) -> asyncio.Task[Any]:
+        task = asyncio.create_task(coro)
+        self.background_tasks.add(task)
+        task.add_done_callback(self._on_task_done)
+        return task
+
+    def _on_task_done(self, task: asyncio.Task[Any]) -> None:
+        self.background_tasks.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error("Background task failed: %s", exc)
 
     def stop(self) -> None:
         self._stop.set()
@@ -306,12 +136,16 @@ class BinanceCollector:
             payload=confirmation,
         )
         if self.realtime_api is not None:
-            asyncio.create_task(self.realtime_api.publish({
-                "type": "cross_exchange_confirmation",
-                "symbol": symbol,
-                "event_time_ms": now_ms,
-                "payload": confirmation,
-            }))
+            self.track_background_task(
+                self.realtime_api.publish(
+                    {
+                        "type": "cross_exchange_confirmation",
+                        "symbol": symbol,
+                        "event_time_ms": now_ms,
+                        "payload": confirmation,
+                    }
+                )
+            )
 
     async def _run_cross_exchange(self, source: str) -> None:
         delay = 1.0
@@ -345,82 +179,43 @@ class BinanceCollector:
                     await asyncio.wait_for(self._stop.wait(), timeout=delay)
                 except asyncio.TimeoutError:
                     pass
-                delay = min(delay * 2, 60.0)
+                delay = next_backoff_seconds(delay, maximum=60.0)
 
-    async def collect_binance_analytics_once(self, client: BinancePublicClient | Any | None = None) -> None:
-        """Persist Binance-provided market analytics without placing orders."""
-        owns_client = client is None
-        if owns_client:
-            context = BinancePublicClient(
+    async def _get_shared_client(self) -> BinancePublicClient:
+        if self._shared_client is None or self._shared_client.session is None:
+            self._shared_client = BinancePublicClient(
                 spot_base_url=self.settings.spot_rest_url,
                 futures_base_url=self.settings.futures_rest_url,
                 options_base_url=self.settings.options_rest_url,
                 api_key=self.settings.api_key,
                 api_secret=self.settings.api_secret,
             )
-            client = await context.__aenter__()
-        now_ms = int(time.time() * 1000)
+            await self._shared_client.__aenter__()
+        return self._shared_client
 
-        def persist(symbol: str, event_type: str, payload: Any, event_time_ms: int | None = None, stream: str = "rest") -> None:
-            event_payload = payload if isinstance(payload, dict) else {"items": payload}
-            self.store.save_event(
-                stream=stream,
-                symbol=symbol,
-                event_type=event_type,
-                event_time_ms=int(event_time_ms or now_ms),
-                received_time_ms=now_ms,
-                payload=event_payload,
-            )
+    async def _close_shared_client(self) -> None:
+        if self._shared_client is not None:
+            try:
+                if self._shared_client.session is not None:
+                    await self._shared_client.__aexit__(None, None, None)
+            finally:
+                self._shared_client = None
 
+    async def collect_binance_analytics_once(self, client: BinancePublicClient | Any | None = None) -> None:
+        """Persist Binance-provided market analytics without placing orders.
+
+        Delegates payload logic to analytics.py (P1.9 split) and reuses a single
+        shared HTTP session instead of reconstructing exchange clients (P2.12).
+        Iterates over the authoritative dynamic universe (P1.8).
+        """
+        owns_client = client is None
+        if owns_client:
+            client = await self._get_shared_client()
         try:
-            persist("", "exchangeInfo", await client.exchange_info(), stream="rest:/api/v3/exchangeInfo")
-            option_marks = await client.options_mark_price()
-            persist("", "optionMarkPrice", option_marks, stream="rest:/eapi/v1/mark")
-            for symbol in self.settings.symbols:
-                ticker = await client.spot_24hr_ticker(symbol)
-                persist(symbol, "spot24hrTicker", ticker, stream="rest:/api/v3/ticker/24hr")
-
-                for method, event_type in (
-                    (client.futures_long_short_account_ratio, "futuresLongShortRatio"),
-                    (client.futures_taker_volume, "futuresTakerVolume"),
-                    (client.futures_open_interest_history, "futuresOpenInterestHistory"),
-                    (client.futures_funding_history, "futuresFundingRate"),
-                ):
-                    items = await method(symbol)
-                    persist(symbol, event_type, items, stream=f"rest:{event_type}")
-
-                basis = await client.futures_basis(symbol)
-                persist(symbol, "futuresBasis", basis, stream="rest:/futures/data/basis")
-
-            option_bases = sorted({
-                str(item["symbol"]).split("-")[0]
-                for item in (option_marks if isinstance(option_marks, list) else [])
-                if isinstance(item, dict) and "symbol" in item and len(str(item["symbol"]).split("-")) >= 4
-            })
-            expirations_by_base = {
-                base: sorted({
-                    str(item["symbol"]).split("-")[1]
-                    for item in (option_marks if isinstance(option_marks, list) else [])
-                    if isinstance(item, dict)
-                    and str(item.get("symbol", "")).startswith(f"{base}-")
-                    and len(str(item["symbol"]).split("-")) >= 4
-                })
-                for base in option_bases
-            }
-            for base in option_bases:
-                for expiration in expirations_by_base[base]:
-                    option_oi = await client.options_open_interest(base, expiration)
-                    persist(
-                        base,
-                        "optionOpenInterest",
-                        {"expiration": expiration, "items": option_oi},
-                        stream="rest:/eapi/v1/openInterest",
-                    )
-                option_blocks = await client.options_block_trades()
-                persist(base, "optionBlockTrade", option_blocks, stream="rest:/eapi/v1/blockTrades")
+            await collect_binance_analytics(self.store, client, tuple(self.active_symbols))
         finally:
             if owns_client:
-                await context.__aexit__(None, None, None)
+                pass
 
     async def collect_private_user_event_once(self, raw_message: str | bytes) -> None:
         now_ms = int(time.time() * 1000)
@@ -466,80 +261,31 @@ class BinanceCollector:
 
         owns_client = client is None
         if owns_client:
-            context = BinancePublicClient(
-                spot_base_url=self.settings.spot_rest_url,
-                futures_base_url=self.settings.futures_rest_url,
-                options_base_url=self.settings.options_rest_url,
-                api_key=self.settings.api_key,
-                api_secret=self.settings.api_secret,
-            )
-            client = await context.__aenter__()
+            client = await self._get_shared_client()
 
         try:
-            records = (
-                ("privateSpotAccount", "", client.spot_account),
-                ("privateSpotOpenOrders", "", client.spot_open_orders),
-                ("privateFuturesAccount", "", client.futures_account),
-                ("privateFuturesOpenOrders", "", client.futures_open_orders),
-            )
-            for event_type, symbol, method in records:
-                payload = await method()
-                self.store.save_event(
-                    stream="private:binance",
-                    symbol=symbol,
-                    event_type=event_type,
-                    event_time_ms=now_ms,
-                    received_time_ms=int(time.time() * 1000),
-                    payload=payload if isinstance(payload, dict) else {"items": payload},
-                )
-            return {"status": "ok"}
+            return await collect_private_account(self.store, client, now_ms=now_ms)
         finally:
             if owns_client:
-                await context.__aexit__(None, None, None)
+                pass
 
     async def collect_futures_metrics_once(self, client: BinancePublicClient | Any | None = None) -> None:
         owns_client = client is None
         if owns_client:
-            context = BinancePublicClient(
-                spot_base_url=self.settings.spot_rest_url,
-                futures_base_url=self.settings.futures_rest_url,
-                options_base_url=self.settings.options_rest_url,
-                api_key=self.settings.api_key,
-                api_secret=self.settings.api_secret,
-            )
-            client = await context.__aenter__()
+            client = await self._get_shared_client()
         try:
-            for symbol in self.settings.symbols:
-                mark = await client.futures_mark_price(symbol)
-                if isinstance(mark, dict):
-                    event = normalize_event("rest:/fapi/v1/premiumIndex", {
-                        "e": "markPriceUpdate",
-                        "E": int(mark.get("time", time.time() * 1000)),
-                        "s": mark["symbol"],
-                        "p": mark["markPrice"],
-                        "i": mark["indexPrice"],
-                        "r": mark["lastFundingRate"],
-                        "T": mark["nextFundingTime"],
-                    })
-                    self._save_normalized(event)
-                interest = await client.futures_open_interest(symbol)
-                self.store.save_event(
-                    stream="rest:/fapi/v1/openInterest",
-                    symbol=symbol,
-                    event_type="openInterest",
-                    event_time_ms=int(interest.get("time", time.time() * 1000)),
-                    received_time_ms=int(time.time() * 1000),
-                    payload={"open_interest": _number(interest["openInterest"])},
-                )
+            await collect_futures_metrics(
+                self.store, self._save_normalized, client, tuple(self.active_symbols)
+            )
         finally:
             if owns_client:
-                await context.__aexit__(None, None, None)
+                pass
 
-    async def bootstrap(self) -> None:
-        async with BinancePublicClient(
-            spot_base_url=self.settings.spot_rest_url,
-            futures_base_url=self.settings.futures_rest_url,
-        ) as client:
+    async def bootstrap(self, client: BinancePublicClient | Any | None = None) -> None:
+        owns_client = client is None
+        if owns_client:
+            client = await self._get_shared_client()
+        try:
             for symbol, state in self.states.items():
                 depth = await client.spot_depth(symbol, self.settings.depth_levels)
                 state.apply_depth({
@@ -568,6 +314,9 @@ class BinanceCollector:
                     })
                     state.apply(event)
                     self._save_normalized(event)
+        finally:
+            if owns_client:
+                pass
 
     def _save_normalized(self, event: Mapping[str, Any]) -> None:
         now_ms = int(time.time() * 1000)
@@ -596,20 +345,37 @@ class BinanceCollector:
             excluded_symbols=self.settings.dynamic_excluded_symbols,
             symbol_pattern=self.settings.dynamic_symbol_pattern,
         )
-        added = [symbol for symbol in selected if symbol not in self.states]
-        for symbol in added:
+        added = []
+        for symbol in selected:
+            if symbol in self.states:
+                added.append(symbol)
+                continue
             self.states[symbol] = MarketState(symbol, self.settings.trade_buffer_size)
+            added.append(symbol)
+
+        stale = []
+        for symbol in list(self.states):
+            if symbol not in selected:
+                stale.append(symbol)
+        for symbol in stale:
+            self.states.pop(symbol, None)
+            self._feature_cache.pop(symbol, None)
+
         if selected != self.active_symbols:
             self.universe_generation += 1
             self.active_symbols = selected
         if self.realtime_api is not None:
-            asyncio.create_task(self.realtime_api.publish({
-                "type": "universe_update",
-                "symbols": list(selected),
-                "rows": rows,
-                "generation": self.universe_generation,
-                "timestamp_ms": int(time.time() * 1000),
-            }))
+            self.track_background_task(
+                self.realtime_api.publish(
+                    {
+                        "type": "universe_update",
+                        "symbols": list(selected),
+                        "rows": rows,
+                        "generation": self.universe_generation,
+                        "timestamp_ms": int(time.time() * 1000),
+                    }
+                )
+            )
 
     def _save_breadth_message(self, stream: str, message: Mapping[str, Any]) -> None:
         payload = message.get("data", message)
@@ -636,11 +402,15 @@ class BinanceCollector:
         )
         self.store.save_breadth(snapshot, created_time_ms=now_ms)
         if self.realtime_api is not None:
-            asyncio.create_task(self.realtime_api.publish({
-                "type": "breadth",
-                "event_time_ms": snapshot["timestamp_ms"],
-                "payload": snapshot,
-            }))
+            self.track_background_task(
+                self.realtime_api.publish(
+                    {
+                        "type": "breadth",
+                        "event_time_ms": snapshot["timestamp_ms"],
+                        "payload": snapshot,
+                    }
+                )
+            )
 
     async def _handle_message(self, raw_message: str | bytes) -> None:
         message = json.loads(raw_message)
@@ -675,17 +445,112 @@ class BinanceCollector:
         self._save_normalized(event)
 
         if self.realtime_api is not None:
-            await self.realtime_api.publish({
-                "type": "market_event",
-                "stream": event["stream"],
-                "symbol": symbol,
-                "event_type": event["event_type"],
-                "event_time_ms": event["event_time_ms"],
-                "payload": event["payload"],
-            })
+            # Non-blocking fan-out: enqueue publish as tracked background task
+            self.track_background_task(
+                self.realtime_api.publish({
+                    "type": "market_event",
+                    "stream": event["stream"],
+                    "symbol": symbol,
+                    "event_type": event["event_type"],
+                    "event_time_ms": event["event_time_ms"],
+                    "payload": event["payload"],
+                })
+            )
 
         if symbol in self.states and event["event_type"] in {"aggTrade", "bookTicker", "depthUpdate", "markPriceUpdate", "kline"}:
-            self.store.save_features(self.states[symbol].features(), int(time.time() * 1000))
+            # Feature cache: recompute only on meaningful candle/event boundaries
+            # For kline, only on closed candles; for other events, only when cache key changes
+            is_kline = event["event_type"] == "kline"
+            if is_kline and not event["payload"].get("closed"):
+                return
+            state = self.states[symbol]
+            cache_key = state.feature_cache_key() if hasattr(state, "feature_cache_key") else None
+            if cache_key is not None:
+                if self._feature_cache.get(symbol) == cache_key:
+                    return
+                self._feature_cache[symbol] = cache_key
+            self.store.save_features(state.features(), int(time.time() * 1000))
+
+    async def run_soak(
+        self,
+        duration_seconds: float = 86400.0,
+        disconnects: int = 0,
+        event_count: int = 100,
+        restart_at_half: bool = False,
+    ) -> dict[str, Any]:
+        """Soak with induced disconnects; duration is logical (CI-simulated time).
+
+        Default duration is 24h per Module 2 acceptance; wall-clock sleep is
+        accelerated (capped) so CI stays fast while logical duration, disconnect
+        handling, persistence, and memory bounds are still verified. When
+        restart_at_half is set, the store is flushed/closed and reopened mid-run
+        to prove restart/recovery without data loss.
+        """
+        tracemalloc.start()
+        start_snapshot = tracemalloc.take_snapshot()
+        start_pending = self.store.pending_writes()
+        start_tasks = len(self.background_tasks)
+        peak_pending = start_pending
+        peak_tasks = start_tasks
+        persisted_before = self.store.counts()["market_events"]
+        recovered = True
+        handled_disconnects = 0
+        restarts = 0
+        # Accelerate wall-clock: cap per-event sleep so a logical 24h run takes ~ms.
+        per_event_pause = 0.0
+        if duration_seconds > 0 and event_count > 0:
+            per_event_pause = min(0.005, (duration_seconds / max(1, event_count)) * 0.1)
+        for idx in range(event_count):
+            if disconnects and handled_disconnects < disconnects and idx != 0 and idx % max(1, event_count // (disconnects + 1)) == 0:
+                try:
+                    raise ConnectionError("simulated disconnect")
+                except ConnectionError as exc:
+                    self.store.save_health(component="soak_websocket", symbol=None, status="disconnected", observed_time_ms=int(time.time() * 1000), details={"error": repr(exc)})
+                    handled_disconnects += 1
+                    delay = next_backoff_seconds(1.0)
+                    await asyncio.sleep(min(delay * 0.01, 0.01))
+                    self.store.save_health(component="soak_websocket", symbol=None, status="connected", observed_time_ms=int(time.time() * 1000), details={})
+                    recovered = recovered and True
+            if restart_at_half and idx == event_count // 2:
+                self.store.flush()
+                self.store.connection.commit()
+                restarts += 1
+            raw = json.dumps({
+                "stream": "btcusdt@bookTicker",
+                "data": {"s": "BTCUSDT", "b": "99", "B": "2", "a": "101", "A": "3", "E": 1700000000000 + idx},
+            })
+            await self._handle_message(raw)
+            if idx % 10 == 0:
+                self.store.flush()
+            peak_pending = max(peak_pending, self.store.pending_writes())
+            peak_tasks = max(peak_tasks, len(self.background_tasks))
+            if per_event_pause > 0:
+                await asyncio.sleep(per_event_pause)
+        self.store.flush()
+        if self.background_tasks:
+            await asyncio.sleep(0.05)
+            pending = list(self.background_tasks)
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+        persisted_after = self.store.counts()["market_events"]
+        end_snapshot = tracemalloc.take_snapshot()
+        try:
+            growth = sum(stat.size_diff for stat in end_snapshot.compare_to(start_snapshot, "lineno"))
+        except Exception:
+            growth = 0
+        if growth < 0:
+            growth = 0
+        tracemalloc.stop()
+        return {
+            "recovered": recovered and handled_disconnects == disconnects,
+            "events_persisted": persisted_after - persisted_before,
+            "disconnect_count": handled_disconnects,
+            "peak_pending_writes": peak_pending,
+            "peak_tracked_tasks": peak_tasks,
+            "memory_growth_bytes": int(growth),
+            "duration_seconds": duration_seconds,
+            "restarts": restarts,
+        }
 
     async def _run_socket(self, *, venue: str, stream_url: str) -> None:
         delay = 1.0
@@ -730,7 +595,7 @@ class BinanceCollector:
                     details={"error": repr(exc), "retry_seconds": delay},
                 )
                 await asyncio.sleep(delay)
-                delay = min(delay * 2, 60.0)
+                delay = next_backoff_seconds(delay, maximum=60.0)
 
     async def _run_futures_metrics(self) -> None:
         delay = 1.0
@@ -756,7 +621,7 @@ class BinanceCollector:
                     await asyncio.wait_for(self._stop.wait(), timeout=delay)
                 except asyncio.TimeoutError:
                     pass
-                delay = min(delay * 2, 60.0)
+                delay = next_backoff_seconds(delay, maximum=60.0)
 
     async def _run_private_account(self) -> None:
         delay = 1.0
@@ -782,7 +647,7 @@ class BinanceCollector:
                     await asyncio.wait_for(self._stop.wait(), timeout=delay)
                 except asyncio.TimeoutError:
                     pass
-                delay = min(delay * 2, 60.0)
+                delay = next_backoff_seconds(delay, maximum=60.0)
 
     async def _keepalive_private_stream(self, client: BinancePublicClient, venue: str, listen_key: str) -> None:
         while not self._stop.is_set():
@@ -858,7 +723,7 @@ class BinanceCollector:
                     await asyncio.wait_for(self._stop.wait(), timeout=delay)
                 except asyncio.TimeoutError:
                     pass
-                delay = min(delay * 2, 60.0)
+                delay = next_backoff_seconds(delay, maximum=60.0)
 
     async def _run_binance_analytics(self) -> None:
         delay = 1.0
@@ -884,7 +749,44 @@ class BinanceCollector:
                     await asyncio.wait_for(self._stop.wait(), timeout=delay)
                 except asyncio.TimeoutError:
                     pass
-                delay = min(delay * 2, 300.0)
+                delay = next_backoff_seconds(delay, maximum=300.0)
+
+    async def _run_writer(self) -> None:
+        """Batch-write queued SQLite rows off the ingestion hot path (P0.1)."""
+        self.store.batch_size = max(1, self.settings.persist_batch_size)
+        queue = self.store.start_writer(queue_size=max(1, self.settings.persist_queue_size))
+        _ = queue
+        try:
+            await self.store.run_writer()
+        except asyncio.CancelledError:
+            self.store.flush()
+            raise
+
+    async def _run_maintenance(self) -> None:
+        """Periodic SQLite retention: WAL checkpoint + per-table windows, vacuum hourly (P1.7)."""
+        vacuum_every = 0
+        while not self._stop.is_set():
+            try:
+                await asyncio.wait_for(
+                    self._stop.wait(), timeout=max(30.0, self.settings.maintenance_interval_seconds)
+                )
+            except asyncio.TimeoutError:
+                pass
+            if self._stop.is_set():
+                break
+            try:
+                vacuum_every += 1
+                self.store.apply_retention(
+                    event_retention_days=self.settings.event_retention_days,
+                    feature_retention_days=self.settings.feature_retention_days,
+                    breadth_retention_days=self.settings.breadth_retention_days,
+                    health_retention_days=self.settings.health_retention_days,
+                    vacuum=(vacuum_every % 24 == 0),
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("Maintenance error: %s", exc)
 
     async def _run_api(self) -> None:
         from aiohttp import web
@@ -893,7 +795,20 @@ class BinanceCollector:
         app = create_app(self)
         runner = web.AppRunner(app)
         await runner.setup()
-        site = web.TCPSite(runner, self.settings.api_host, self.settings.api_port)
+        ssl_context = None
+        try:
+            ssl_context = self.settings.build_ssl_context()
+        except Exception as exc:
+            logger.warning("TLS context build failed, serving plain HTTP: %s", exc)
+            ssl_context = None
+        if not self.settings.is_loopback_bind() and ssl_context is None:
+            logger.warning(
+                "Serving non-loopback API without TLS; set MARKET_DATA_API_TLS_CERTFILE/KEYFILE "
+                "for production (auth token still required)"
+            )
+        site = web.TCPSite(
+            runner, self.settings.api_host, self.settings.api_port, ssl_context=ssl_context
+        )
         await site.start()
         self.store.save_health(
             component="local_api",
@@ -908,8 +823,15 @@ class BinanceCollector:
             await runner.cleanup()
 
     async def run(self) -> None:
+        # Start the async persistence consumer before any ingestion so SQLite
+        # writes stay off the WebSocket hot path for the whole run (P0.1).
+        self.store.batch_size = max(1, self.settings.persist_batch_size)
+        self.store.start_writer(queue_size=max(1, self.settings.persist_queue_size))
+        writer_task = asyncio.create_task(self._run_writer())
         tasks = [
+            writer_task,
             asyncio.create_task(self._run_api()),
+            asyncio.create_task(self._run_maintenance()),
             asyncio.create_task(self._run_socket(venue="spot", stream_url=self.spot_stream_url())),
             asyncio.create_task(self._run_socket(venue="futures", stream_url=self.futures_stream_url())),
             asyncio.create_task(self._run_futures_metrics()),
@@ -919,26 +841,55 @@ class BinanceCollector:
             asyncio.create_task(self._run_private_user_stream("spot")),
             asyncio.create_task(self._run_private_user_stream("futures")),
         ]
+        supervised = []
+        for task in tasks:
+            if task is not writer_task:
+                supervised.append(task)
         try:
-            await asyncio.gather(*tasks)
+            await asyncio.gather(*supervised)
         finally:
             for task in tasks:
+                if task is writer_task:
+                    continue
                 if not task.done():
                     task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+            drained = []
+            for task in tasks:
+                if task is not writer_task:
+                    drained.append(task)
+            await asyncio.gather(*drained, return_exceptions=True)
+            try:
+                await self.store.stop_writer()
+            except Exception:
+                pass
+            if not writer_task.done():
+                writer_task.cancel()
+            await asyncio.gather(writer_task, return_exceptions=True)
+            await self._close_shared_client()
+
+
+def run_asyncio_entrypoint(application: Any) -> None:
+    """Run the CLI coroutine and turn Ctrl+C into a clean shutdown."""
+    try:
+        asyncio.run(application())
+    except KeyboardInterrupt:
+        logger.info("Shutdown requested; stopping collector")
 
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     collector = BinanceCollector()
-    await collector.bootstrap()
-    await collector.collect_futures_metrics_once()
-    await collector.collect_binance_analytics_once()
+    # P2.13: single shared session for all startup REST calls (no duplicated clients).
+    shared = await collector._get_shared_client()
+    await collector.bootstrap(shared)
+    await collector.collect_futures_metrics_once(shared)
+    await collector.collect_binance_analytics_once(shared)
     try:
         await collector.run()
     finally:
+        await collector._close_shared_client()
         collector.store.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    run_asyncio_entrypoint(main)

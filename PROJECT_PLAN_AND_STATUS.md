@@ -1,6 +1,6 @@
 # Crypto Market-Data Platform: Initial Plan and Maintained Status
 
-Last updated: 2026-09-22 13:03 IST
+Last updated: 2026-09-22 13:14 IST
 Project root: `D:\my-trading-app`
 
 This document is the maintained record of the original goals, actual implementation, deviations from the original plan, remaining work, and verification status. Update the sections below whenever a requirement is completed, changed, or intentionally rejected.
@@ -400,10 +400,10 @@ For every update:
 
 ### 2026-09-22
 
-- Created this maintained project-plan/status document.
-- Recorded the original goals and the actual deviations.
-- Recorded the current Binance collector, dynamic universe, quality layer, cross-exchange layer, SQLite storage, REST API, and WebSocket status.
-- Recorded 65 passing tests and live endpoint/universe verification.
+- Added graceful Ctrl+C handling through `run_asyncio_entrypoint`.
+- Both `python main.py` and `python -m binance_data_layer.collector` now stop without exposing an asyncio cancellation traceback.
+- Added a regression test for CLI interrupt handling.
+- Verification: 66 tests passed; Python compilation passed.
 
 Future entries should use this format:
 

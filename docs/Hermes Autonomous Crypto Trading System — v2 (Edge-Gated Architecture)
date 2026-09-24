@@ -1,0 +1,434 @@
+Hermes Autonomous Crypto Trading System — v2 (Edge-Gated Architecture)
+Revision of the September 2026 architecture blueprint. This version inserts an explicit, non-bypassable edge-validation gate ahead of the strategy and execution layers, resolves what "Hermes" actually is, and marks the strategies already falsified by prior testing so they cannot silently re-enter production.
+
+0. What Changed From v1, and Why
+v1 was a strong execution/safety architecture with one structural gap: it treated the Strategy Proposal Layer (Momentum, Trend Following, Breakout, Mean Reversion, VWAP Reversion, Order Flow) as ready-to-build components, without reference to the fact that this exact strategy family had already been tested on real BTC/USDT data and returned a decisive NO CREDIBLE EDGE verdict — twice (Phase 0 and Phase 0b), across six independent pre-registered experiments, with bootstrap confidence intervals entirely negative and two promising-looking filters failing out-of-sample replication.
+
+v2 makes three changes:
+
+An Edge Validation Gate is now a first-class, blocking phase. No strategy — new or already-falsified — reaches the Strategy Proposal Layer without a fresh, pre-registered, out-of-sample pass. Falsified strategies are recorded permanently and cannot be silently reintroduced.
+"Hermes" is now explicitly defined as a deterministic/statistical decision layer, not an LLM reasoning agent, closing the ambiguity in v1 between "avoid asking an LLM to interpret raw events" (Section 6) and a confidence / free-text decision_rationale field that implied LLM output (Section 9–10).
+The roadmap is reordered so infrastructure investment (n8n execution, order lifecycle, learning pipeline, strategy versioning) is explicitly gated behind having at least one strategy that survives the same bar Phase 0/0b already applied — rather than being built in parallel with an unresolved research question.
+Everything else from v1 — the risk engine, the audit trail, the failure-handling table, the traceability requirement — was already sound and is carried forward with only clarifying edits.
+
+1. Executive Summary
+This document defines the target architecture for an autonomous crypto trading platform in which Hermes continuously observes real-time market conditions, builds structured market context, generates and evaluates trading proposals that have already cleared a pre-registered edge-validation gate, makes BUY/SELL/HOLD decisions, passes only deterministic risk-approved actions to an n8n execution workflow, monitors the resulting orders and positions, analyzes completed trades, records structured lessons, validates strategy improvements, and feeds approved strategy versions back into Hermes.
+
+The existing market-data platform is treated as a completed foundational layer. Hermes consumes its API and WebSocket interfaces rather than duplicating market-data collection. Binance remains downstream of n8n for execution. The architecture separates probabilistic analysis from deterministic safety controls and prevents a single losing trade from directly changing production strategy. It also prevents a strategy without a validated edge from ever reaching the risk engine in the first place.
+
+2. Target System at a Glance
+Core closed loop:
+
+External Market Data → Market Data Layer → Hermes Observer → Context Builder
+→ [EDGE VALIDATION GATE] → Strategy Proposals → Decision Engine
+→ Deterministic Risk Engine → n8n → Binance → Order/Fill Monitoring
+→ Position/Trade Lifecycle → Trade Analyzer → Lessons
+→ Backtest/Paper Validation → Strategy Versioning → Hermes
+Layer	Responsibility	Key rule
+Market Data	Collect, normalize, persist and expose market information	Read-only; data quality is first-class
+Edge Validation	Certify a strategy has a real, out-of-sample, cost-and-tax-net edge before it can propose trades	Pre-registered acceptance criteria, fresh holdout, no retries beyond the registered plan
+Hermes	Observe, analyze, reason and decide	Deterministic/statistical only (see §5a) — consumes structured context, not raw events, and does not free-form reason via an LLM
+Risk	Validate exposure and execution parameters	Deterministic and non-bypassable
+n8n	Execution orchestration	Only receives risk-approved execution requests
+Binance	Actual exchange execution	Order/fill status is independently reconciled
+Trade Intelligence	Explain outcomes and identify mistakes	Compare expectation with realized behavior
+Learning	Create and validate improvements	No direct mutation of production after one trade; new candidates re-enter through the Edge Validation Gate
+Memory/DB	Persist the full audit trail	Stable IDs connect every lifecycle stage
+3. Current State: Market Data Collection Layer
+(Unchanged from v1 — this layer is sound and does not depend on strategy outcomes.)
+
+Project root: D:\my-trading-app
+
+Continuously running, read-only crypto market-data collector with a local REST/WebSocket API and SQLite persistence.
+
+Supported data sources: Binance Spot (trades, book, candles, mini-ticker), Binance USDⓈ-M Futures (mark/index price, funding, liquidations, breadth), Binance Options (mark data, IV, Greeks, OI), optional Coinbase/Kraken/OKX, optional private read-only Binance collection, dynamic liquid/trending coin discovery.
+
+Existing derived features: returns, EMA, RSI, ATR, VWAP, Bollinger bandwidth, volume ratio, multi-timeframe alignment, rolling CVD, aggressive-buy %, large-trade concentration, spread/imbalance/depth, execution-quality estimates, data-quality signals, cross-exchange confirmation.
+
+Current API: /health, /market/top-coins, /market/{symbol}/snapshot, /market/{symbol}/features, /breadth/latest, /cross-exchange/{symbol}, /data-health, /events, WS /ws[?symbol=]. Default endpoint: http://127.0.0.1:8000.
+
+Persistence: data/market_data.sqlite3 — market_events, feature_snapshots, breadth_snapshots, data_health. Dynamic universe: 20 symbols, min quote volume 5,000,000, refresh every 300s.
+
+Verification status: 66 tests passing; coverage across streams, normalization, depth, candles, options, futures, signing/time sync, breadth, features, execution estimates, quality, cross-exchange, dynamic universe, REST/WS delivery, graceful shutdown.
+
+4. Market Data Layer: Production Hardening Before 24/7 Use
+(Unchanged from v1 — these are infrastructure fixes, independent of the strategy question, and can proceed now.)
+
+Priority	Issue	Required improvement
+P0	Synchronous SQLite writes/commits in WS hot path	Queue persistence and batch writes away from ingestion
+P0	WebSocket publication can block ingestion	Bounded async queues, non-blocking fan-out
+P0	Fire-and-forget publish tasks unmanaged	Track/cancel tasks, handle failures explicitly
+P0	Non-loopback API can run without authentication	Loopback-only by default, or add auth/TLS
+P0	No long-lived lifecycle/integration tests	Soak tests, reconnect tests, restart/recovery tests
+P1	Dynamic symbol state can grow indefinitely	Retire stale symbols, bound memory
+P1	No SQLite retention/maintenance policy	Retention, indexes, WAL/checkpointing, vacuum
+P1	Dynamic universe not consistently applied to REST analytics	Make universe generation authoritative
+P1	Large collector module	Split ingestion/analytics/storage/quality/orchestration
+P1	Technical features recalculated too often	Cache/recompute on candle/event boundaries
+P2	API SQL bypasses storage abstraction	Route reads through a repository layer
+P2	Repeated client/session construction	Reuse HTTP client sessions/exchange clients
+P2	Repeated retry loops, duplicated requests	Centralize retry/backoff, dedupe startup calls
+5. Hermes Core Architecture
+Hermes should be implemented as a separate service or clearly isolated module that consumes the existing market-data service.
+
+observer.py       — reads REST snapshots and WebSocket events
+context.py        — creates normalized, decision-ready market context
+strategies/       — VALIDATED, deterministic strategy proposal modules only (see §5a, §8)
+decision.py       — combines proposals, evidence, historical performance, current state
+risk/             — deterministic risk checks and exact position sizing
+execution/        — n8n request client and lifecycle tracking
+memory/           — decision, trade, lesson and strategy history
+learning/         — post-trade analysis; candidates route back through the Edge Validation Gate
+supervisor.py     — 24/7 lifecycle, health, restart, backoff, graceful shutdown
+5a. What Hermes Is (resolving the v1 ambiguity)
+Hermes is a deterministic/statistical decision layer, not a free-reasoning LLM agent:
+
+Strategy proposals come from rule-based or statistically-fitted models (e.g. the momentum/breakout/mean-reversion family, or future validated alternatives) with fixed, versioned parameters — not from an LLM interpreting context at decision time.
+Any LLM in the system is restricted to the read-only market-intelligence/news layer (summarization and classification only, as already scoped in your fourth external review), never to producing the action, confidence, or decision_rationale fields directly.
+The confidence field in the Decision object (§9) is a calibrated statistical output (e.g. proposal agreement rate, historical hit rate of the triggering condition) — not a model's self-reported certainty. decision_rationale is template-generated from structured evidence, not free text, so it stays reproducible and backtestable.
+This matters because Section 26's testing strategy (deterministic reproducibility, no look-ahead) is only achievable if the decision layer itself is deterministic given the same inputs. An LLM making per-cycle trading calls would silently break that guarantee.
+
+5b. Edge Validation Gate (new — blocking)
+No strategy, old or new, may appear in strategies/ (§8) or receive a production strategy-version ID (§17) without passing this gate.
+
+Already-falsified strategies (permanently recorded, cannot re-enter without a materially different hypothesis — not just retuned parameters):
+
+Strategy family	Status	Evidence
+Breakout (24/12/14 lookback, hourly)	FALSIFIED	Phase 0: net return −27.78%, bootstrap CI entirely negative
+Scalping (5/3/14 lookback, 1-min)	FALSIFIED	Phase 0: net return −39.42%, bootstrap CI entirely negative
+Breakout + ADX>25 filter	FALSIFIED	Phase 0b: improved headline (−5.87%) but failed pre-registered replication (bull-market-dependent)
+Breakout + magnitude≥0.5×ATR filter	FALSIFIED	Phase 0b: improved headline (−2.84%) but failed replication
+Breakout + volume>20SMA filter	FALSIFIED	Phase 0b: NO CREDIBLE EDGE
+Corrected baseline (intrabar stop-loss fix)	FALSIFIED	Phase 0b: −26.48%
+Section 8's strategy list (Momentum, Trend Following, Breakout, Mean Reversion, VWAP Reversion, Order Flow) therefore cannot be built as-is. Trend Following, Mean Reversion, VWAP Reversion and Order Flow have not yet been tested against this bar on crypto data and remain candidates — but only through this gate, not by default inclusion.
+
+Gate requirements for any candidate (new or revived):
+
+Hypothesis and acceptance criteria pre-registered in research/reports/EXPERIMENT_REGISTRY.md before seeing test-period results.
+Backtest on a fresh holdout period never used in prior experiments.
+Net of realistic fees, slippage, and India VDA tax treatment (30% on transfer gains, no loss offset, 1% TDS as a cash-flow drag).
+Bootstrap confidence interval reported; must exclude zero on the positive side to pass.
+Regime-robustness check across at least two structurally different periods (e.g. trending vs. range-bound, as already done for the momentum family in Steps 9–11).
+Internal replication check: if a filter or refinement improves headline numbers, it must be tested on data outside the period it was tuned on before being credited.
+A null result is accepted as a legitimate, final outcome for that hypothesis — no unlimited retry loop against the same holdout.
+Only strategies that pass all seven criteria are eligible to be added to strategies/ as a versioned module.
+
+6. Hermes Continuous Observation Loop
+Hermes should not repeatedly ask an LLM to interpret thousands of raw events. The market-data service already performs normalization and deterministic feature computation. (See §5a — this applies to the entire decision path, not just event volume.)
+
+Recommended flow:
+
+Receive market events and periodic snapshots.
+Check freshness, completeness and contradiction status.
+Update the active market context for each tracked symbol.
+Detect regime changes or meaningful state transitions.
+Trigger strategy evaluation at controlled intervals and on important events — using only gate-approved strategies.
+Generate strategy proposals independently.
+Evaluate proposals against current portfolio/risk state and historical strategy performance.
+Produce BUY/SELL/HOLD with an explicit expiry time.
+Send BUY/SELL only through deterministic risk validation.
+Persist the decision and all structured evidence.
+7. Structured Market Context
+(Unchanged from v1.)
+
+Market regime, price/trend, order flow, derivatives, options, liquidity, cross-exchange confirmation, data quality, portfolio state, strategy state (current production version, recent performance, disabled/degraded strategies).
+
+8. Strategy Proposal Layer (revised — gated)
+Strategies propose actions, not directly place orders. Every row in this table requires a gate_status and links to its Edge Validation Gate record before it may run in production.
+
+Strategy	Example evidence	Output	Gate status
+Momentum	Returns, EMA acceleration, volume, CVD	BUY/SELL/HOLD + confidence	Not yet tested on crypto — requires gate pass
+Trend Following	Higher-timeframe alignment, EMA/VWAP	Directional proposal + horizon	Not yet tested — requires gate pass
+Breakout	Range break, volume expansion, order flow	Breakout proposal + invalidation	FALSIFIED — excluded
+Mean Reversion	Distance from VWAP/bands, exhaustion	Reversion proposal + target	Not yet tested — requires gate pass
+VWAP Reversion	VWAP deviation + liquidity	Entry/exit proposal	Not yet tested — requires gate pass
+Order Flow	CVD, aggressive flow, depth imbalance	Flow proposal	Not yet tested — requires gate pass
+Each proposal includes strategy ID/version, symbol, direction, confidence (calibrated, per §5a), expected horizon, evidence references, invalidation conditions, timestamp, and a reference to the gate record that validated it.
+
+9. Hermes Decision Engine
+Recommended decision object (clarified per §5a — confidence and thesis are derived deterministically from structured evidence, not generated by an LLM):
+
+{
+  "decision_id": "uuid",
+  "timestamp": "...",
+  "symbol": "BTCUSDT",
+  "action": "BUY|SELL|HOLD",
+  "confidence": 0.81,
+  "entry": {},
+  "position": {},
+  "risk": {
+    "stop_loss": 0.0,
+    "take_profit": 0.0,
+    "risk_amount": 0.0
+  },
+  "time_horizon": "15m",
+  "thesis": [],
+  "strategy_version_id": "gate-approved version, not free text",
+  "expiry_seconds": 120
+}
+A decision must expire. A stale BUY/SELL signal must never be treated as a current order instruction.
+
+10. Decision Evidence and Audit Storage
+The system stores an auditable structured decision record rather than private chain-of-thought — capturing what information was used, which strategies proposed what, the risk assessment, the final decision and the outcome. decision_rationale is composed from a fixed template over the evidence fields (per §5a), not free-generated text:
+
+{
+  "decision_id": "dec_123",
+  "market_snapshot_id": "snap_891",
+  "action": "BUY",
+  "confidence": 0.81,
+  "evidence": [
+    {"feature": "ema_alignment", "value": true},
+    {"feature": "cvd", "value": 12340},
+    {"feature": "funding", "value": 0.00012}
+  ],
+  "strategy_votes": {
+    "momentum": "BUY",
+    "trend": "BUY"
+  },
+  "decision_rationale": "Template-generated from evidence fields above.",
+  "risk_assessment": "Acceptable",
+  "decision": "BUY"
+}
+11. Deterministic Risk Engine
+(Unchanged from v1 — this section was already correct.)
+
+Maximum position/portfolio/per-symbol exposure; daily loss limit and drawdown controls; leverage/margin constraints; stop-loss distance validation; exact position-size calculation; existing-position and duplicate-order checks; cooldown rules; liquidity/depth requirements; data freshness/completeness requirements; kill switch and emergency halt; maximum concurrent positions and notional limits.
+
+Critical invariant (unchanged): the exact quantity approved by RiskManager must be the exact quantity sent to n8n/Binance. No later execution layer may recalculate it.
+
+12. n8n Execution Boundary
+(Unchanged from v1.)
+
+Hermes → Risk-approved ExecutionRequest → n8n webhook → schema validation
+→ execution logging → exchange/order-rule validation → Binance
+→ order status/fills → Hermes monitoring
+n8n is an orchestration boundary, not a replacement for deterministic risk controls.
+
+13. Binance Order Lifecycle
+(Unchanged from v1.)
+
+NEW → PARTIALLY_FILLED → FILLED / CANCELED / REJECTED
+
+Stable IDs: Decision ID → Execution ID → Order ID → Position ID → Exit Order ID → Trade ID. Exchange reconciliation recovers from restarts, missed WS events, or n8n failures.
+
+14. Position and Trade Monitoring
+(Unchanged from v1.) Entry/exit/mark price, quantity/notional, realized/unrealized PnL, fees/funding, stop/target state, duration, MFE, MAE, expected vs. actual slippage, latency/fill quality, partial fills/amendments, reconciliation state.
+
+15. Post-Trade Intelligence
+(Unchanged from v1.) On close, Hermes analyzes the full lifecycle: what was expected, which features/strategies supported the decision, what actually happened, whether entry/exit/thesis held up, and whether the outcome was strategy, execution, data, risk, or normal-variance error.
+
+16. Mistake and Lesson Model
+(Unchanged from v1, with one addition: a "gate error" category.)
+
+Category	Example	Action
+Signal error	Breakout signal triggered on transient volume spike	Create candidate lesson
+Regime error	Trend strategy used in a range-bound regime	Candidate regime filter
+Execution error	Actual slippage materially exceeded estimate	Review liquidity threshold
+Risk error	Position size inconsistent with approved risk	Block deployment, audit risk path
+Data error	Stale/contradictory data contributed to decision	Mark non-actionable, investigate
+Gate error (new)	A strategy version drifted from its gate-approved parameters, or was deployed without a gate record	Immediate halt of that strategy; audit deployment pipeline
+Normal loss	Thesis was valid but outcome was adverse	Do not automatically change strategy
+17. Continuous Learning Architecture (revised)
+Learning must be controlled. A single loss must never automatically rewrite the live strategy — and a candidate strategy version may never skip the Edge Validation Gate (§5b) on its way back to production, regardless of how it was generated.
+
+Closed Trade → Trade Analysis → Candidate Lesson → Candidate Strategy Version
+→ EDGE VALIDATION GATE (fresh holdout, pre-registered criteria)
+→ Backtest → Paper Simulation → Evaluation → Promotion → Production Strategy Version
+Every strategy version is immutable. Every production decision records its strategy version. Candidate versions remain isolated from live trading. Rollback must be possible instantly. A strategy can be disabled without deleting its history.
+
+18. Hermes Memory / Database Model
+(Unchanged from v1, with one added table.)
+
+Table	Purpose
+raw_market_events	Short-retention raw event audit trail
+candles	Normalized OHLCV history
+feature_snapshots	Decision-ready feature state
+breadth_snapshots	Market breadth history
+derivatives_snapshots	Funding/OI/basis/liquidation state
+universe_history	Dynamic universe changes
+data_health	Freshness and integrity state
+edge_validation_records (new)	Every gate attempt: hypothesis, pre-registered criteria, holdout period, result, pass/fail — permanent, append-only
+decisions	Every BUY/SELL/HOLD decision
+decision_evidence	Structured evidence used by decisions
+strategy_proposals	Individual strategy outputs
+risk_decisions	Risk approval/rejection and exact approved parameters
+executions	n8n execution requests and acknowledgements
+orders	Exchange order lifecycle
+positions	Position lifecycle
+trades	Closed trade records
+trade_analysis	Post-trade diagnosis
+lessons	Candidate and validated lessons
+strategy_versions	Immutable strategy versions and promotion state (must reference an edge_validation_records ID)
+performance_metrics	Strategy/portfolio performance aggregates
+19. Traceability Requirement
+MARKET SNAPSHOT → EDGE VALIDATION RECORD → HERMES DECISION
+→ STRATEGY PROPOSALS/EVIDENCE → RISK DECISION → EXECUTION → ORDER
+→ POSITION → TRADE → TRADE ANALYSIS → LESSON → STRATEGY VERSION
+Every trade must be reconstructable from start to finish, now including which gate record certified the strategy that produced it.
+
+20. 24/7 Runtime Architecture
+(Unchanged from v1.) Market Observer, Context Builder, Strategy Engine, Decision Engine, Risk Engine, n8n Client, Trade Monitor, Learning Worker, Supervisor. A failure in one worker should not silently terminate the entire autonomous system.
+
+21. Failure Handling and Safety
+(Unchanged from v1, plus one line.)
+
+If market data is stale/incomplete: HOLD/no new entry.
+If cross-exchange data is contradictory beyond tolerance: reduce confidence or HOLD.
+If risk service is unavailable: no execution.
+If n8n is unavailable: expire requests, do not queue indefinitely.
+If Binance execution state cannot be reconciled: freeze new entries and reconcile.
+If database persistence fails: stop new trading rather than operate without an audit trail.
+If Hermes becomes unhealthy: supervisor restarts it and verifies state from durable storage.
+If daily loss/drawdown limit is reached: activate kill switch.
+If strategy version validation fails: keep the existing production version.
+If a strategy's edge_validation_records reference is missing or its parameters have drifted from what was gated: treat as a risk error (§16) and halt that strategy immediately.
+On restart: rebuild portfolio state from exchange reconciliation plus durable local records.
+22. API and Event Contracts
+(Unchanged from v1, with EdgeValidationRecord added.)
+
+Contract	Key fields
+EdgeValidationRecord (new)	record_id, hypothesis, pre_registered_criteria, holdout_period, cost_and_tax_assumptions, bootstrap_ci, replication_result, verdict, linked_strategy_version_id
+MarketSnapshot	snapshot_id, symbol, timestamp, price, technicals, order_flow, derivatives, liquidity, quality
+StrategyProposal	proposal_id, strategy_id, strategy_version, symbol, action, confidence, evidence, horizon
+Decision	decision_id, snapshot_id, action, confidence, thesis, risk_plan, expiry
+RiskDecision	risk_decision_id, decision_id, status, approved_quantity, stop, target, exposure_after
+ExecutionRequest	execution_id, risk_decision_id, symbol, side, quantity, order_type, protection, expiry
+Order	order_id, execution_id, exchange_order_id, state, fills, fees, timestamps
+Position	position_id, symbol, quantity, entry, protection, state
+Trade	trade_id, position_id, realized_pnl, fees, duration, MFE, MAE
+TradeAnalysis	trade_id, expected, actual, error_category, findings, candidate_lessons
+StrategyVersion	strategy_id, version, status, parameters, validation_metrics, edge_validation_record_id, promoted_at
+23. Recommended Hermes Folder Structure
+hermes/
+├── main.py
+├── supervisor.py
+├── config.py
+├── observer.py
+├── context.py
+├── decision.py
+├── models/
+│   ├── market.py
+│   ├── strategy.py
+│   ├── decision.py
+│   ├── execution.py
+│   └── trade.py
+├── edge_validation/            # NEW — the gate itself
+│   ├── registry.py             # tracks EDGE VALIDATION RECORDS
+│   ├── acceptance_criteria.py
+│   └── replication_check.py
+├── strategies/                 # only gate-approved modules land here
+│   ├── base.py
+│   └── (populated only after a strategy passes edge_validation/)
+├── risk/
+│   ├── engine.py
+│   ├── position_sizing.py
+│   └── limits.py
+├── execution/
+│   ├── n8n_client.py
+│   ├── order_manager.py
+│   └── reconciliation.py
+├── monitoring/
+│   ├── positions.py
+│   └── health.py
+├── learning/
+│   ├── trade_analyzer.py
+│   ├── lesson_engine.py
+│   ├── backtester.py
+│   ├── paper_engine.py
+│   └── promotion.py             # promotion requires edge_validation_record_id
+├── memory/
+│   ├── repository.py
+│   └── schemas.py
+└── tests/
+24. Operational Configuration
+(Unchanged from v1.)
+
+BINANCE_API_KEY / BINANCE_API_SECRET   — optional read-only private access
+BINANCE_SYMBOLS=BTCUSDT,ETHUSDT
+MARKET_DATA_DB=data/market_data.sqlite3
+BINANCE_DEPTH_LEVELS=20
+TRADE_BUFFER_SIZE=500
+SNAPSHOT_INTERVAL=5
+STALE_AFTER_SECONDS=30
+ENABLE_MARKET_BREADTH=1
+BREADTH_QUOTE_ASSETS=USDT,USDC,FDUSD
+BREADTH_TOP_N=10
+BREADTH_EXCLUDE_STABLECOIN_BASE=1
+ENABLE_CROSS_EXCHANGE=1
+CROSS_EXCHANGE_MAX_AGE_SECONDS=10
+DYNAMIC_UNIVERSE_ENABLED=1
+DYNAMIC_UNIVERSE_SIZE=20
+DYNAMIC_MIN_QUOTE_VOLUME=5000000
+DYNAMIC_REFRESH_SECONDS=300
+MARKET_DATA_API_HOST=127.0.0.1
+MARKET_DATA_API_PORT=8000
+25. Security Requirements
+(Unchanged from v1.) Withdrawals disabled on API keys, minimum required permissions; never log secrets/signed URLs; loopback-only market-data API unless authenticated access explicitly required; authenticate/sign n8n webhooks with replay protection; idempotency keys for execution requests; validate symbol/side/quantity/order-type/expiry at every boundary; separate paper/testnet from production credentials; kill switch independent of the decision layer; secrets in environment/secret management, not source control.
+
+26. Testing Strategy
+(Unchanged from v1, with the Edge Validation level added explicitly.)
+
+Test level	Examples
+Edge Validation (new)	Pre-registered hypothesis, fresh holdout, bootstrap CI, regime-robustness, replication check — this is the gate itself, tested as rigorously as any other component
+Unit	Feature calculations, sizing, risk limits, strategy proposals, state machines
+Contract	Market API, Hermes schemas, n8n webhook schemas
+Integration	Market-data → Hermes context → decision → risk
+Execution integration	n8n → Binance testnet/paper environment
+Lifecycle	Order/fill/position/trade transitions
+Reconciliation	Restart after missed events or partial fills
+Learning	Trade analysis → lesson → candidate strategy → back through the gate
+Soak	24h/72h continuous runtime, reconnects, DB growth
+Failure injection	API outage, WS disconnect, stale data, n8n failure, Binance rejection
+Backtest validation	No look-ahead, deterministic reproducibility, versioned datasets
+27. Existing Autonomous Engine Lessons to Preserve
+(Unchanged from v1 — carried forward as-is.)
+
+Do not keep PositionMonitor as an isolated in-memory TP/SL checker; integrate with real fills, positions and reconciliation.
+Wire filled trades into trade analysis and learning rather than stopping at execution.
+Do not validate one quantity and later submit a different quantity.
+Do not use minimum-quantity fallbacks that can exceed the calculated risk budget.
+Do not hardcode equity or risk assumptions in production.
+Malformed model output must fail closed to HOLD, never become a BUY because a keyword happens to appear.
+Do not add learning/evolution claims without an actual StrategyRegistry, strategy-version lifecycle and validation pipeline.
+Add autonomous-specific lifecycle tests rather than relying only on component tests.
+28. Implementation Roadmap (reordered)
+Phase	Deliverables	Exit condition
+0. Edge Validation Gate (new, blocking — do this first)	Build edge_validation/ registry; re-run Trend Following, Mean Reversion, VWAP Reversion, Order Flow against the same rigor as Phase 0/0b (pre-registered, fresh holdout, bootstrap CI, regime robustness, replication)	At least one strategy family passes the gate, or a documented, comprehensive null result across the remaining families is reached
+1. Harden Data Layer	Async persistence, bounded queues, auth, retention, lifecycle tests	Stable 24/7 market-data service
+2. Hermes Foundation	Observer, context builder, DB repository, supervisor — analysis-only, no strategies wired yet	Hermes runs continuously without trading
+3. Decision Engine	Gate-approved strategy modules only, decision schema, evidence storage	Deterministic reproducible BUY/SELL/HOLD records referencing a valid edge_validation_record_id
+4. Risk Engine	Limits, sizing, exposure, kill switch	Every decision receives an auditable risk result
+5. n8n Execution	Signed webhook, idempotency, execution tracking	Approved requests execute safely in testnet/paper
+6. Position Lifecycle	Orders, fills, positions, reconciliation	Every trade has complete lifecycle state
+7. Trade Intelligence	Closed-trade analyzer, error taxonomy, lessons	Every closed trade produces structured analysis
+8. Learning	Backtest, paper simulation, strategy versions (each re-entering through Phase 0)	Validated strategy versions can be promoted/rolled back
+9. 24/7 Production	Monitoring, alerts, recovery, dashboards, backups	System survives outages/restarts and remains auditable
+Phases 1 and 0 can run in parallel — hardening the data layer doesn't depend on the strategy question. Phases 2 onward should not start in earnest until Phase 0 has a result, because there is currently no gate-approved strategy to give Hermes anything valid to decide on.
+
+29. Recommended First Implementation Step (revised)
+Do not start with Hermes Foundation, and do not start by connecting live Binance execution. The next implementation step is Phase 0: run Trend Following, Mean Reversion, VWAP Reversion, and Order Flow through the same pre-registered, fresh-holdout, cost-and-tax-adjusted testing regime that already falsified Breakout and Scalping. Only once at least one strategy family produces a bootstrap CI that excludes zero on the positive side, survives a regime-robustness check, and replicates out-of-sample, does it make sense to begin Hermes Foundation with that strategy as its first wired module. Building the observer/context/decision/risk/execution scaffolding before that point produces a system with nothing valid to decide.
+
+30. End-to-End Target Flow (revised)
+A candidate strategy passes the Edge Validation Gate on a fresh holdout, or the project reaches a documented null result.
+Market-data service continuously collects and validates real-time data.
+Hermes receives current snapshots and important events.
+Hermes builds structured context for each candidate symbol.
+Only gate-approved strategies generate proposals.
+Hermes evaluates proposals, historical performance and portfolio state.
+Hermes creates an auditable BUY/SELL/HOLD decision with an expiry, deterministically (§5a).
+Deterministic risk validates the decision and computes exact approved quantity/protection.
+Only an approved ExecutionRequest is sent to n8n.
+n8n validates and submits the request to Binance.
+Order/fill events are reconciled into the local lifecycle.
+Position monitoring tracks the open position until closure.
+Closed trades are analyzed against the original thesis and execution.
+Candidate mistakes/lessons are stored.
+Candidate strategy changes re-enter through the Edge Validation Gate before backtest/paper-test.
+Validated strategy versions can be promoted and rolled back.
+Hermes loads the active strategy versions and continues the loop 24/7.
+31. Final Architecture Principle
+The system should be autonomous in operation, but not uncontrolled — and it should not be built before it has something real to operate on. Hermes is responsible for observation, analysis and deterministic decisioning; the Edge Validation Gate is responsible for making sure that decisioning has a real basis; deterministic risk is responsible for safety; n8n is responsible for execution orchestration; Binance is the execution venue; the trade analyzer is responsible for learning from outcomes; and the database provides the durable memory and audit trail connecting every step.
+
+The desired end state is not simply an AI that predicts BUY or SELL. It is a closed-loop trading operating system in which every market observation, edge-validation attempt, strategy proposal, decision, risk check, execution, fill, position, trade outcome, lesson and strategy version can be reconstructed, evaluated and improved in a controlled manner — and in which no component downstream of the gate can ever run on an unvalidated strategy.
+
+Hermes Autonomous Crypto Trading System • Architecture Blueprint v2 (Edge-Gated) • September 2026

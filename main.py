@@ -9,10 +9,8 @@ Environment variables:
     BINANCE_DEPTH_LEVELS=20
 """
 
-from binance_data_layer.collector import main
+from binance_data_layer.collector import main, run_asyncio_entrypoint
 
 
 if __name__ == "__main__":
-    import asyncio
-
-    asyncio.run(main())
+    run_asyncio_entrypoint(main)

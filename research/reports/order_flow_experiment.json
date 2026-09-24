@@ -1,0 +1,50 @@
+{
+  "acceptance": {
+    "failed_criteria": [
+      "three_of_four_windows",
+      "aggregate_positive",
+      "bootstrap_excludes_zero",
+      "beats_risk_free_by_ci_width",
+      "stress_costs"
+    ],
+    "passed": false
+  },
+  "aggregate_net_return": -0.10130410367669901,
+  "bootstrap_ci": [
+    -0.016414192152738656,
+    -0.012204430414275776
+  ],
+  "candle_count": 2160,
+  "dataset_sha256": "8cb531d3703c06fed5e9d15355965f916a3889892a82adf9ae11f619015f6d7d",
+  "holdout": [
+    "2024-04-02",
+    "2024-07-01"
+  ],
+  "interval": "1h",
+  "record_id": "cc6dbcef-5be7-4911-943b-5c30ac4c96a7",
+  "replication": {
+    "baseline_replication_net_return": null,
+    "improvement_over_baseline": null,
+    "passed": false,
+    "primary_net_return": -0.08907276558136128,
+    "primary_period": [
+      "2024-04-02",
+      "2024-05-16"
+    ],
+    "replication_net_return": -0.11108107911253083,
+    "replication_period": [
+      "2024-05-17",
+      "2024-06-30"
+    ]
+  },
+  "stress_net_return": -0.13271612856849666,
+  "symbol": "BTCUSDT",
+  "trade_count": 111,
+  "verdict": "FAIL",
+  "window_net_returns": [
+    -0.08907276558136128,
+    -0.10620004268794037,
+    -0.09886252732496359,
+    -0.11108107911253083
+  ]
+}

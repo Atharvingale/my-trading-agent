@@ -1,0 +1,125 @@
+{
+  "method": "same-trade accounting attribution over hash-verified identical candles; bootstrap percentile CI, seed 20260924, 2000 samples, diagnostic-only",
+  "rows": [
+    {
+      "cost_breakdown_notional_share": {
+        "fees": 0.032022596374570444,
+        "slippage": 0.03202265488713877,
+        "tds_drag": 0.16024543144737213,
+        "vda_tax": 0.031726002392018775
+      },
+      "cost_gap_same_trades": 0.05715354155086832,
+      "dataset_sha256_match": true,
+      "holdout": [
+        "2024-01-01",
+        "2024-04-01"
+      ],
+      "like_for_like_gap_current_code": 0.05715354155086832,
+      "net_of_cost_bootstrap_ci": [
+        -0.01725408240428955,
+        -0.006737639370766806
+      ],
+      "net_of_cost_return": -0.053375542134956,
+      "pre_cost_bootstrap_ci": [
+        -0.00226158255568056,
+        0.01084178578347928
+      ],
+      "pre_cost_return_same_trades": 0.003777999415912313,
+      "reproduced_bootstrap_ci_current_code": [
+        -0.017010096557592492,
+        -0.00695470817891991
+      ],
+      "reproduced_net_return_current_code": -0.053375542134956,
+      "same_entry_exit_timing": false,
+      "strategy_id": "trend_following",
+      "trade_count": 66,
+      "trade_sequence_reproduced": true,
+      "zero_cost_bootstrap_ci": [
+        -0.002402140499904625,
+        0.01075883965535873
+      ],
+      "zero_cost_rerun_return": 0.003688908506821414,
+      "zero_cost_trade_count": 66
+    },
+    {
+      "cost_breakdown_notional_share": {
+        "fees": 0.05275755707498608,
+        "slippage": 0.05275755654863757,
+        "tds_drag": 0.26352136586405644,
+        "vda_tax": 0.00924816910438584
+      },
+      "cost_gap_same_trades": 0.10127458439254167,
+      "dataset_sha256_match": true,
+      "holdout": [
+        "2024-04-02",
+        "2024-07-01"
+      ],
+      "like_for_like_gap_current_code": 0.10127458439254167,
+      "net_of_cost_bootstrap_ci": [
+        -0.016414192152738656,
+        -0.012204430414275776
+      ],
+      "net_of_cost_return": -0.10130410367669901,
+      "pre_cost_bootstrap_ci": [
+        -0.00222368014389502,
+        0.002373801456896597
+      ],
+      "pre_cost_return_same_trades": -2.9519284157337258e-05,
+      "reproduced_bootstrap_ci_current_code": [
+        -0.016414192152738656,
+        -0.012204430414275776
+      ],
+      "reproduced_net_return_current_code": -0.10130410367669901,
+      "same_entry_exit_timing": false,
+      "strategy_id": "order_flow",
+      "trade_count": 111,
+      "trade_sequence_reproduced": true,
+      "zero_cost_bootstrap_ci": [
+        -0.002345883625936195,
+        0.0024115272019130138
+      ],
+      "zero_cost_rerun_return": -6.339244960845117e-05,
+      "zero_cost_trade_count": 111
+    },
+    {
+      "cost_breakdown_notional_share": {
+        "fees": 0.045369159320781914,
+        "slippage": 0.045369132251255676,
+        "tds_drag": 0.22648360332352016,
+        "vda_tax": 0.012488414144895233
+      },
+      "cost_gap_same_trades": 0.09378463384795033,
+      "dataset_sha256_match": true,
+      "holdout": [
+        "2024-07-02",
+        "2024-10-01"
+      ],
+      "like_for_like_gap_current_code": 0.09378463384795033,
+      "net_of_cost_bootstrap_ci": [
+        -0.01862820599370702,
+        -0.012315123116352772
+      ],
+      "net_of_cost_return": -0.09487515796387674,
+      "pre_cost_bootstrap_ci": [
+        -0.0043576661504554255,
+        0.0025481959405406077
+      ],
+      "pre_cost_return_same_trades": -0.001090524115926414,
+      "reproduced_bootstrap_ci_current_code": [
+        -0.01862820599370702,
+        -0.012315123116352772
+      ],
+      "reproduced_net_return_current_code": -0.09487515796387674,
+      "same_entry_exit_timing": false,
+      "strategy_id": "mean_reversion",
+      "trade_count": 96,
+      "trade_sequence_reproduced": true,
+      "zero_cost_bootstrap_ci": [
+        -0.004222664627545771,
+        0.002783980855053756
+      ],
+      "zero_cost_rerun_return": -0.0007252029709121609,
+      "zero_cost_trade_count": 92
+    }
+  ]
+}
