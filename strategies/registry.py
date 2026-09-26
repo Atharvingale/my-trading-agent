@@ -2,9 +2,16 @@
 
 Raises, never warns, on ungated loads. Falsified families are rejected with
 an explicit message so a future contributor cannot wire them in by accident.
+
+Two-plane note (00-overview-and-index.md, 04-strategy-layer.md): `load_strategy`
+is the low-level PASS check used by existing tests. Production code must use
+`load_production_strategy`, which additionally requires an immutable approved
+production version (PASS alone is not sufficient for production).
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from edge_validation.registry import EdgeValidationRegistry, StrategyNotGatedError
 from strategies.base import LoadedStrategy, require_gate
@@ -35,6 +42,40 @@ def load_strategy(strategy_id: str, registry: EdgeValidationRegistry) -> LoadedS
         version = "v1"
     else:
         version = str(version).strip()
+    return LoadedStrategy(
+        strategy_id=record.strategy_id,
+        edge_validation_record_id=record.record_id,
+        strategy_version=version,
+    )
+
+
+def load_production_strategy(
+    strategy_id: str,
+    registry: EdgeValidationRegistry,
+    versions: Any,
+) -> LoadedStrategy:
+    """Production loader: PASS plus approved immutable version, else raise.
+
+    Why a second function instead of changing load_strategy: existing Module 4
+    tests cover the PASS-only check and must stay green. Production callers use
+    this function so a PASS without human approval still cannot be loaded.
+    """
+    if _is_falsified(strategy_id):
+        raise StrategyNotGatedError(
+            "strategy %r is FALSIFIED per 01-edge-validation-gate.md and cannot be loaded" % (strategy_id,)
+        )
+    record = require_gate(strategy_id, registry)
+    active = versions.get_active_version(record.strategy_id)
+    if active is None:
+        raise StrategyNotGatedError(
+            "strategy %r has PASS but no approved production version" % (strategy_id,)
+        )
+    if active.edge_validation_record_id != record.record_id:
+        raise StrategyNotGatedError(
+            "approved version for %r points at stale record %r, current PASS is %r"
+            % (strategy_id, active.edge_validation_record_id, record.record_id)
+        )
+    version = str(active.version_id).strip() or "v1"
     return LoadedStrategy(
         strategy_id=record.strategy_id,
         edge_validation_record_id=record.record_id,

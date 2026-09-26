@@ -27,6 +27,10 @@ REQUIRED_ASSUMPTIONS = {
     "tds_is_cash_flow_drag",
 }
 FALSIFIED_FAMILIES = {"breakout", "scalping"}
+# Provenance sources for the two-plane architecture (00-overview-and-index.md).
+# A candidate hypothesis may enter from a human or Module 15; the source
+# does not change the statistical requirements, it is only retained for audit.
+PROVENANCE_SOURCES = {"HUMAN", "AI_RESEARCH", "TRADE_LEARNING"}
 
 
 class StrategyNotGatedError(RuntimeError):
@@ -50,6 +54,16 @@ class EdgeValidationRecord:
     strategy_family: str
     requires_replication: bool
     acceptance_checks: dict[str, bool] | None
+    # Research provenance (01-edge-validation-gate.md). Retained for audit only,
+    # never weakens the gate. Older rows predate these fields and read as None/HUMAN.
+    candidate_id: str | None = None
+    parent_candidate_id: str | None = None
+    hypothesis_id: str | None = None
+    signal_class: str | None = None
+    source: str = "HUMAN"
+    provider_used: str | None = None
+    multiple_testing_family: str | None = None
+    multiple_testing_threshold: float | None = None
 
 
 class EdgeValidationRegistry:
@@ -155,6 +169,14 @@ class EdgeValidationRegistry:
         linked_strategy_version_id: str | None = None,
         materially_new_hypothesis: bool = False,
         new_hypothesis_rationale: str | None = None,
+        candidate_id: str | None = None,
+        parent_candidate_id: str | None = None,
+        hypothesis_id: str | None = None,
+        signal_class: str | None = None,
+        source: str = "HUMAN",
+        provider_used: str | None = None,
+        multiple_testing_family: str | None = None,
+        multiple_testing_threshold: float | None = None,
     ) -> str:
         """Persist and publish a hypothesis before any holdout result is accepted."""
         strategy = _normalize_identifier(strategy_id, "strategy_id")
@@ -180,6 +202,18 @@ class EdgeValidationRegistry:
             raise ValueError("materially new hypotheses require an auditable rationale")
         if linked_strategy_version_id is not None and not linked_strategy_version_id.strip():
             raise ValueError("linked_strategy_version_id must be non-empty when provided")
+        # Research provenance is audit-only: Module 15 and human hypotheses share
+        # the identical validation path, so validation here must not branch on source.
+        provenance = _validate_provenance(
+            candidate_id=candidate_id,
+            parent_candidate_id=parent_candidate_id,
+            hypothesis_id=hypothesis_id,
+            signal_class=signal_class,
+            source=source,
+            provider_used=provider_used,
+            multiple_testing_family=multiple_testing_family,
+            multiple_testing_threshold=multiple_testing_threshold,
+        )
 
         self._check_fresh_holdout(family, holdout_period)
         self._check_unique_hypothesis(family, hypothesis_text)
@@ -194,6 +228,14 @@ class EdgeValidationRegistry:
             "linked_strategy_version_id": linked_strategy_version_id,
             "materially_new_hypothesis": materially_new_hypothesis,
             "new_hypothesis_rationale": (new_hypothesis_rationale or "").strip() or None,
+            "candidate_id": provenance["candidate_id"],
+            "parent_candidate_id": provenance["parent_candidate_id"],
+            "hypothesis_id": provenance["hypothesis_id"],
+            "signal_class": provenance["signal_class"],
+            "source": provenance["source"],
+            "provider_used": provenance["provider_used"],
+            "multiple_testing_family": provenance["multiple_testing_family"],
+            "multiple_testing_threshold": provenance["multiple_testing_threshold"],
         }
         self.connection.execute(
             """INSERT INTO edge_validation_records
@@ -457,7 +499,49 @@ class EdgeValidationRegistry:
             strategy_family=str(hypothesis_row["strategy_family"]),
             requires_replication=bool(payload["requires_replication"]),
             acceptance_checks=result.get("acceptance_checks"),
+            candidate_id=payload.get("candidate_id"),
+            parent_candidate_id=payload.get("parent_candidate_id"),
+            hypothesis_id=payload.get("hypothesis_id"),
+            signal_class=payload.get("signal_class"),
+            source=str(payload.get("source") or "HUMAN"),
+            provider_used=payload.get("provider_used"),
+            multiple_testing_family=payload.get("multiple_testing_family"),
+            multiple_testing_threshold=payload.get("multiple_testing_threshold"),
         )
+
+    def get_provenance(self, record_id: str) -> dict[str, Any]:
+        """Return the research provenance for one attempt, back to its candidate."""
+        record = self._record_for_attempt(record_id)
+        provenance: dict[str, Any] = {}
+        provenance["record_id"] = record.record_id
+        provenance["strategy_id"] = record.strategy_id
+        provenance["candidate_id"] = record.candidate_id
+        provenance["parent_candidate_id"] = record.parent_candidate_id
+        provenance["hypothesis_id"] = record.hypothesis_id
+        provenance["signal_class"] = record.signal_class
+        provenance["source"] = record.source
+        provenance["provider_used"] = record.provider_used
+        provenance["multiple_testing_family"] = record.multiple_testing_family
+        provenance["multiple_testing_threshold"] = record.multiple_testing_threshold
+        return provenance
+
+    def trace_candidate(self, candidate_id: str) -> list[EdgeValidationRecord]:
+        """Walk the parent chain for one candidate lineage in insertion order."""
+        token = str(candidate_id).strip()
+        if not token:
+            raise ValueError("candidate_id must be non-empty")
+        lineage: list[EdgeValidationRecord] = []
+        for record in self.list_records():
+            if record.candidate_id == token or record.parent_candidate_id == token:
+                lineage.append(record)
+        # Explicit insertion-order pass keeps reruns identical without sorted().
+        ordered: list[EdgeValidationRecord] = []
+        for record in self.list_records():
+            for member in lineage:
+                if member.record_id == record.record_id:
+                    ordered.append(member)
+                    break
+        return ordered
 
 
 def _strategy_family_for_lookup(strategy_id: str) -> str:
@@ -554,6 +638,54 @@ def _validate_regimes(regime_results: Mapping[str, float]) -> dict[str, float]:
             raise ValueError(f"regime result for {regime!r} must be a finite return")
         result[regime.strip()] = float(value)
     return result
+
+
+def _validate_provenance(
+    *,
+    candidate_id: str | None,
+    parent_candidate_id: str | None,
+    hypothesis_id: str | None,
+    signal_class: str | None,
+    source: str,
+    provider_used: str | None,
+    multiple_testing_family: str | None,
+    multiple_testing_threshold: float | None,
+) -> dict[str, Any]:
+    # Why strict here: provenance must be auditable, so empty strings are
+    # rejected rather than silently stored as missing. Source is closed to the
+    # three planes in 00-overview-and-index.md; anything else fails closed.
+    if not isinstance(source, str):
+        raise ValueError("source must be HUMAN, AI_RESEARCH, or TRADE_LEARNING")
+    token = source.strip().upper()
+    if token not in PROVENANCE_SOURCES:
+        raise ValueError("source must be HUMAN, AI_RESEARCH, or TRADE_LEARNING")
+    provenance: dict[str, Any] = {}
+    provenance["source"] = token
+    for name, value in (
+        ("candidate_id", candidate_id),
+        ("parent_candidate_id", parent_candidate_id),
+        ("hypothesis_id", hypothesis_id),
+        ("signal_class", signal_class),
+        ("provider_used", provider_used),
+        ("multiple_testing_family", multiple_testing_family),
+    ):
+        if value is None:
+            provenance[name] = None
+            continue
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{name} must be a non-empty string when provided")
+        provenance[name] = value.strip()
+    if multiple_testing_threshold is None:
+        provenance["multiple_testing_threshold"] = None
+    else:
+        threshold = multiple_testing_threshold
+        if isinstance(threshold, bool) or not isinstance(threshold, (float, int)):
+            raise ValueError("multiple_testing_threshold must be a number in (0, 1)")
+        number = float(threshold)
+        if not math.isfinite(number) or not 0.0 < number < 1.0:
+            raise ValueError("multiple_testing_threshold must be a number in (0, 1)")
+        provenance["multiple_testing_threshold"] = number
+    return provenance
 
 
 def _same_ci(left: tuple[float, float], right: tuple[float, float]) -> bool:

@@ -27,6 +27,7 @@ def append_hypothesis(
     criteria = json.dumps(payload["pre_registered_criteria"], indent=2, sort_keys=True)
     assumptions = json.dumps(payload["cost_and_tax_assumptions"], indent=2, sort_keys=True)
     period = payload["holdout_period"]
+    # Provenance lines retain the Module 15 candidate lineage without weakening the gate.
     text = (
         f"## Preregistered hypothesis — {created_at.isoformat()}\n\n"
         f"- Record ID: `{record_id}`\n"
@@ -35,6 +36,14 @@ def append_hypothesis(
         f"- Holdout: {period[0]} through {period[1]}\n"
         f"- Requires independent replication: {payload['requires_replication']}\n"
         f"- Materially new rationale: {payload.get('new_hypothesis_rationale') or 'None'}\n"
+        f"- Source: `{payload.get('source') or 'HUMAN'}`\n"
+        f"- Candidate ID: `{payload.get('candidate_id') or 'None'}`\n"
+        f"- Parent candidate ID: `{payload.get('parent_candidate_id') or 'None'}`\n"
+        f"- Hypothesis ID: `{payload.get('hypothesis_id') or 'None'}`\n"
+        f"- Signal class: `{payload.get('signal_class') or 'None'}`\n"
+        f"- Provider: `{payload.get('provider_used') or 'None'}`\n"
+        f"- Multiple-testing family: `{payload.get('multiple_testing_family') or 'None'}`\n"
+        f"- Multiple-testing threshold: `{payload.get('multiple_testing_threshold')}`\n"
         f"- Pre-registered thresholds:\n\n```json\n{criteria}\n```\n"
         f"- Cost and tax assumptions:\n\n```json\n{assumptions}\n```\n\n"
         "Outcome: PENDING — no results recorded yet.\n\n---\n\n"
