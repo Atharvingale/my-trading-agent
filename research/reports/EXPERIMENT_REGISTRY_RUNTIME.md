@@ -512,3 +512,366 @@ Outcome: PENDING — no results recorded yet.
 
 ---
 
+## Preregistered hypothesis — 2026-09-26T18:01:27.030888+00:00
+
+- Record ID: `2832430c-9465-4e90-b682-0ce49937568f`
+- Strategy: `funding_carry_f1` (family `funding_carry_f1`)
+- Hypothesis: FF1 SHORT carry: trailing-3 mean funding above 0.0100%, hold 1 period(s).
+- Holdout: 2026-08-24 through 2026-09-26
+- Requires independent replication: False
+- Materially new rationale: None
+- Source: `HUMAN`
+- Candidate ID: `None`
+- Parent candidate ID: `None`
+- Hypothesis ID: `None`
+- Signal class: `funding-rate carry`
+- Provider: `research-operator`
+- Multiple-testing family: `funding-carry`
+- Multiple-testing threshold: `0.008333333333333333`
+- Pre-registered thresholds:
+
+```json
+{
+  "bootstrap_must_exclude_zero": true,
+  "minimum_trades": 20,
+  "multiple_testing_required_alpha": 0.008333333333333333
+}
+```
+- Cost and tax assumptions:
+
+```json
+{
+  "fee_rate": 0.001,
+  "loss_offset_allowed": false,
+  "slippage_rate": 0.001,
+  "tax_rate": 0.312,
+  "tds_is_cash_flow_drag": true,
+  "tds_rate": 0.01
+}
+```
+
+Outcome: PENDING — no results recorded yet.
+
+---
+
+## Preregistered hypothesis — 2026-09-26T18:01:27.038170+00:00
+
+- Record ID: `94123903-267d-4768-b002-bf3e256a4829`
+- Strategy: `funding_carry_f2` (family `funding_carry_f2`)
+- Hypothesis: FF2 SHORT carry: trailing-3 mean funding above 0.0500%, hold 1 period(s) with calm filter.
+- Holdout: 2026-08-24 through 2026-09-26
+- Requires independent replication: False
+- Materially new rationale: None
+- Source: `HUMAN`
+- Candidate ID: `None`
+- Parent candidate ID: `None`
+- Hypothesis ID: `None`
+- Signal class: `funding-rate carry`
+- Provider: `research-operator`
+- Multiple-testing family: `funding-carry`
+- Multiple-testing threshold: `0.0071428571428571435`
+- Pre-registered thresholds:
+
+```json
+{
+  "bootstrap_must_exclude_zero": true,
+  "minimum_trades": 20,
+  "multiple_testing_required_alpha": 0.0071428571428571435
+}
+```
+- Cost and tax assumptions:
+
+```json
+{
+  "fee_rate": 0.001,
+  "loss_offset_allowed": false,
+  "slippage_rate": 0.001,
+  "tax_rate": 0.312,
+  "tds_is_cash_flow_drag": true,
+  "tds_rate": 0.01
+}
+```
+
+Outcome: PENDING — no results recorded yet.
+
+---
+
+## Preregistered hypothesis — 2026-09-26T18:01:27.046108+00:00
+
+- Record ID: `7beed950-5391-40f6-a412-6c801c573274`
+- Strategy: `funding_carry_f3` (family `funding_carry_f3`)
+- Hypothesis: FF3 LONG carry: trailing-3 mean funding below 0.0100%, hold 1 period(s).
+- Holdout: 2026-08-24 through 2026-09-26
+- Requires independent replication: False
+- Materially new rationale: None
+- Source: `HUMAN`
+- Candidate ID: `None`
+- Parent candidate ID: `None`
+- Hypothesis ID: `None`
+- Signal class: `funding-rate carry`
+- Provider: `research-operator`
+- Multiple-testing family: `funding-carry`
+- Multiple-testing threshold: `0.00625`
+- Pre-registered thresholds:
+
+```json
+{
+  "bootstrap_must_exclude_zero": true,
+  "minimum_trades": 20,
+  "multiple_testing_required_alpha": 0.00625
+}
+```
+- Cost and tax assumptions:
+
+```json
+{
+  "fee_rate": 0.001,
+  "loss_offset_allowed": false,
+  "slippage_rate": 0.001,
+  "tax_rate": 0.312,
+  "tds_is_cash_flow_drag": true,
+  "tds_rate": 0.01
+}
+```
+
+Outcome: PENDING — no results recorded yet.
+
+---
+
+## Result — 2026-09-26T18:01:27.055302+00:00
+
+- Preregistration record ID: `2832430c-9465-4e90-b682-0ce49937568f`
+- Verdict: **NULL_RESULT**
+- Evidence:
+
+```json
+{
+  "acceptance_checks": {
+    "fresh_holdout_for_strategy_family": false,
+    "independent_replication_when_refined": false,
+    "net_of_fees_slippage_and_vda_tax": false,
+    "null_result_recorded_without_retries": false,
+    "positive_bootstrap_confidence_interval": false,
+    "preregistered_before_holdout": false,
+    "two_structurally_different_regimes": false
+  },
+  "bootstrap_ci": [
+    0.0,
+    0.0
+  ],
+  "regime_results": {},
+  "replication_result": null
+}
+```
+
+---
+
+## Result — 2026-09-26T18:01:27.070574+00:00
+
+- Preregistration record ID: `94123903-267d-4768-b002-bf3e256a4829`
+- Verdict: **NULL_RESULT**
+- Evidence:
+
+```json
+{
+  "acceptance_checks": {
+    "fresh_holdout_for_strategy_family": false,
+    "independent_replication_when_refined": false,
+    "net_of_fees_slippage_and_vda_tax": false,
+    "null_result_recorded_without_retries": false,
+    "positive_bootstrap_confidence_interval": false,
+    "preregistered_before_holdout": false,
+    "two_structurally_different_regimes": false
+  },
+  "bootstrap_ci": [
+    0.0,
+    0.0
+  ],
+  "regime_results": {},
+  "replication_result": null
+}
+```
+
+---
+
+## Result — 2026-09-26T18:01:27.086779+00:00
+
+- Preregistration record ID: `7beed950-5391-40f6-a412-6c801c573274`
+- Verdict: **NULL_RESULT**
+- Evidence:
+
+```json
+{
+  "acceptance_checks": {
+    "fresh_holdout_for_strategy_family": false,
+    "independent_replication_when_refined": false,
+    "net_of_fees_slippage_and_vda_tax": false,
+    "null_result_recorded_without_retries": false,
+    "positive_bootstrap_confidence_interval": false,
+    "preregistered_before_holdout": false,
+    "two_structurally_different_regimes": false
+  },
+  "bootstrap_ci": [
+    0.0,
+    0.0
+  ],
+  "regime_results": {},
+  "replication_result": null
+}
+```
+
+---
+
+## Preregistered hypothesis — 2026-09-26T18:32:05.115748+00:00
+
+- Record ID: `acde8e0e-8132-483c-bdc9-cf69cec63c99`
+- Strategy: `funding_carry_f4` (family `funding_carry_f4`)
+- Hypothesis: F4 funding anomaly fade: z of trailing-30 settled rates beyond 2.0 fades the anomaly (SHORT positive, LONG negative), hold 1 period.
+- Holdout: 2026-06-25 through 2026-08-24
+- Requires independent replication: False
+- Materially new rationale: None
+- Source: `HUMAN`
+- Candidate ID: `None`
+- Parent candidate ID: `None`
+- Hypothesis ID: `None`
+- Signal class: `funding-rate carry`
+- Provider: `research-operator`
+- Multiple-testing family: `funding-carry`
+- Multiple-testing threshold: `0.005555555555555556`
+- Pre-registered thresholds:
+
+```json
+{
+  "bootstrap_must_exclude_zero": true,
+  "frozen_holdout_hash": "648272978407cf7ffd577f283d313affda3fd0bc2106b98cc34a227d5b6d2ef8",
+  "frozen_sha256": "836c56c225f5e7010535680a342308e3d826813ac98c946394e7ec4f6cd74896",
+  "minimum_trades": 20,
+  "multiple_testing_required_alpha": 0.005555555555555556
+}
+```
+- Cost and tax assumptions:
+
+```json
+{
+  "fee_rate": 0.001,
+  "loss_offset_allowed": false,
+  "slippage_rate": 0.001,
+  "tax_rate": 0.312,
+  "tds_is_cash_flow_drag": true,
+  "tds_rate": 0.01
+}
+```
+
+Outcome: PENDING — no results recorded yet.
+
+---
+
+## Result — 2026-09-26T18:35:38.919722+00:00
+
+- Preregistration record ID: `acde8e0e-8132-483c-bdc9-cf69cec63c99`
+- Verdict: **NULL_RESULT**
+- Evidence:
+
+```json
+{
+  "acceptance_checks": {
+    "fresh_holdout_for_strategy_family": false,
+    "independent_replication_when_refined": false,
+    "net_of_fees_slippage_and_vda_tax": false,
+    "null_result_recorded_without_retries": false,
+    "positive_bootstrap_confidence_interval": false,
+    "preregistered_before_holdout": false,
+    "two_structurally_different_regimes": false
+  },
+  "bootstrap_ci": [
+    0.0,
+    0.0
+  ],
+  "regime_results": {},
+  "replication_result": null
+}
+```
+
+---
+
+## Preregistered hypothesis — 2026-09-26T18:41:16.693652+00:00
+
+- Record ID: `e26e330b-22e4-4793-939e-6cf28df71121`
+- Strategy: `funding_carry_f4` (family `funding_carry_f4`)
+- Hypothesis: F4 funding anomaly fade: z of trailing-30 settled rates beyond 2.0 fades the anomaly (SHORT positive, LONG negative), hold 1 period. Second attempt on a disjoint window after the first submission (orphan PENDING, infrastructure crash before any evaluation) was honestly nulled; rules and parameters unchanged.
+- Holdout: 2026-05-03 through 2026-06-18
+- Requires independent replication: False
+- Materially new rationale: None
+- Source: `HUMAN`
+- Candidate ID: `None`
+- Parent candidate ID: `None`
+- Hypothesis ID: `None`
+- Signal class: `funding-rate carry`
+- Provider: `research-operator`
+- Multiple-testing family: `funding-carry`
+- Multiple-testing threshold: `0.005`
+- Pre-registered thresholds:
+
+```json
+{
+  "bootstrap_must_exclude_zero": true,
+  "frozen_holdout_hash": "8a78e4146dfe4e8e3d50461e0cc0e89a2fbdd96c504f9658ab5933ac153bd2fd",
+  "frozen_sha256": "836c56c225f5e7010535680a342308e3d826813ac98c946394e7ec4f6cd74896",
+  "minimum_trades": 20,
+  "multiple_testing_required_alpha": 0.005
+}
+```
+- Cost and tax assumptions:
+
+```json
+{
+  "fee_rate": 0.001,
+  "loss_offset_allowed": false,
+  "slippage_rate": 0.001,
+  "tax_rate": 0.312,
+  "tds_is_cash_flow_drag": true,
+  "tds_rate": 0.01
+}
+```
+
+Outcome: PENDING — no results recorded yet.
+
+---
+
+## Result — 2026-09-26T18:41:16.855622+00:00
+
+- Preregistration record ID: `e26e330b-22e4-4793-939e-6cf28df71121`
+- Verdict: **FAIL**
+- Evidence:
+
+```json
+{
+  "acceptance_checks": {
+    "fresh_holdout_for_strategy_family": true,
+    "independent_replication_when_refined": false,
+    "net_of_fees_slippage_and_vda_tax": true,
+    "null_result_recorded_without_retries": true,
+    "positive_bootstrap_confidence_interval": false,
+    "preregistered_before_holdout": true,
+    "two_structurally_different_regimes": true
+  },
+  "bootstrap_ci": [
+    -0.02358711458920981,
+    -0.009562033071326094
+  ],
+  "evidence": {
+    "dataset_id": "funding-holdout-funding_carry_f4",
+    "dataset_sha256": "36fa530f040e2a5960d09c0e34e36e9c855c887312cebee95a5a21a4be64a403",
+    "fingerprint": "2e74ae91f7467469b63460f847d8bff24491b36287dd44d74eba02be281d99df",
+    "net_return": -0.016184573008122215
+  },
+  "regime_results": {
+    "second-leg-down": -0.11031743109146208,
+    "third-leg-down": -0.2781123211034711
+  },
+  "replication_result": "FAIL"
+}
+```
+
+---
+

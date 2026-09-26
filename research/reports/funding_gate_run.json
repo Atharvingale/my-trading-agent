@@ -1,0 +1,61 @@
+{
+  "experiments": [
+    {
+      "reason": "no qualifying holdings on the holdout",
+      "record_id": "2832430c-9465-4e90-b682-0ce49937568f",
+      "strategy_id": "funding_carry_f1",
+      "trade_count": 0,
+      "verdict": "NULL_RESULT"
+    },
+    {
+      "reason": "no qualifying holdings on the holdout",
+      "record_id": "94123903-267d-4768-b002-bf3e256a4829",
+      "strategy_id": "funding_carry_f2",
+      "trade_count": 0,
+      "verdict": "NULL_RESULT"
+    },
+    {
+      "reason": "no qualifying holdings on the holdout",
+      "record_id": "7beed950-5391-40f6-a412-6c801c573274",
+      "strategy_id": "funding_carry_f3",
+      "trade_count": 0,
+      "verdict": "NULL_RESULT"
+    }
+  ],
+  "holdout_hash": "814f1045f4d9a4bc646f7d7b4ca87049a5c09783bec31d94ab57d307f244609f",
+  "holdout_n": 200,
+  "regime_legs": [
+    {
+      "end_ms": 1788537600000,
+      "name": "first-leg-range",
+      "return": 0.0048291156214735915,
+      "start_ms": 1787587200000
+    },
+    {
+      "end_ms": 1789488000000,
+      "name": "second-leg-down",
+      "return": -0.04055050972635144,
+      "start_ms": 1788537600000
+    },
+    {
+      "end_ms": 1790445600000,
+      "name": "third-leg-up",
+      "return": 0.10126040739383152,
+      "start_ms": 1789488000000
+    }
+  ],
+  "splits_ms": {
+    "holdout": [
+      1787587200000,
+      1790438400001
+    ],
+    "research": [
+      1776067200006,
+      1784678400000
+    ],
+    "validation": [
+      1784707200000,
+      1787558400002
+    ]
+  }
+}

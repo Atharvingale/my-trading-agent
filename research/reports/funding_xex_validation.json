@@ -1,0 +1,179 @@
+{
+  "dislocation": {
+    "candidates": [
+      {
+        "candidate_id": "f88048cf-8dc4-47af-9560-b4fa23b59bd7",
+        "hypothesis_id": "c542a3dc-87b5-4bed-9a3f-e2ad25db9475",
+        "signal_class": "cross-exchange dislocation"
+      },
+      {
+        "candidate_id": "b7ec4542-d9ba-43a4-9e82-a98b779cfd39",
+        "hypothesis_id": "6bc684c3-dd93-47f9-b95a-4a3b2c3a617e",
+        "signal_class": "cross-exchange dislocation"
+      },
+      {
+        "candidate_id": "488cea1d-ab6a-404f-b97c-5fd3da89d6bb",
+        "hypothesis_id": "bfcfd467-8d35-4c8d-89dc-df723322c7dc",
+        "signal_class": "cross-exchange dislocation"
+      }
+    ],
+    "dataset_hash": "217c5c5c3ad57dbab0fe962f88d94ac5f88cd9a6feda245467f8f4e16ef52e31",
+    "descriptive": {
+      "confirmed": 7806,
+      "disagreement_bps": {
+        "p50": 2.596709087856424,
+        "p90": 4.259917574896781,
+        "p99": 5.844779303564367
+      },
+      "n": 8421
+    },
+    "evaluation": {
+      "dataset_hash": "217c5c5c3ad57dbab0fe962f88d94ac5f88cd9a6feda245467f8f4e16ef52e31",
+      "hypotheses_registered": 3,
+      "hypotheses_tested": 0,
+      "ledger_tested_elsewhere": 5,
+      "n": 8421,
+      "note": "registered hypotheses consume no multiple-testing budget until tested",
+      "reasons": [
+        "missing executable data: per-venue bid quotes with synchronized timestamps",
+        "missing executable data: per-venue ask quotes with synchronized timestamps",
+        "missing executable data: per-venue spread at signal time",
+        "missing executable data: per-venue depth at signal time",
+        "missing executable data: venue-pair fee schedule for the traded symbols",
+        "missing executable data: transfer/settlement latency assumption between venues",
+        "span 4.4 days below 60-day gate minimum",
+        "only 1 regime leg(s), need 2"
+      ],
+      "regime_legs": [
+        "single-4d-window"
+      ],
+      "span_days": 4.396761319444445,
+      "verdict": "INCONCLUSIVE"
+    },
+    "hypotheses": [
+      "D1",
+      "D2",
+      "D3"
+    ],
+    "n_observations": 8421,
+    "quality": {
+      "duplicates": 0,
+      "gaps_over_1h": 8,
+      "impossible_spreads": 0,
+      "n": 8421,
+      "ok": true,
+      "ordered": true,
+      "reasons": [],
+      "span_days": 4.396761319444445,
+      "symbols": [
+        "BTCUSDT",
+        "ETHUSDT"
+      ],
+      "unavailable": 615
+    },
+    "threshold_crossings": [
+      {
+        "crossings": 18,
+        "hypothesis_id": "D1",
+        "note": "descriptive count only; no executable prices, no returns computed",
+        "persistence": 3,
+        "threshold_bps": 5.0
+      },
+      {
+        "crossings": 1,
+        "hypothesis_id": "D2",
+        "note": "descriptive count only; no executable prices, no returns computed",
+        "persistence": 3,
+        "threshold_bps": 10.0
+      },
+      {
+        "crossings": 0,
+        "hypothesis_id": "D3",
+        "note": "descriptive count only; no executable prices, no returns computed",
+        "persistence": 5,
+        "threshold_bps": 20.0
+      }
+    ],
+    "verdict": "INCONCLUSIVE"
+  },
+  "funding": {
+    "candidates": [
+      {
+        "candidate_id": "762215f3-7060-4185-aaa0-e6162063dfbc",
+        "hypothesis_id": "7f238035-de84-49ea-8591-0350678b10e7",
+        "signal_class": "funding-rate carry"
+      },
+      {
+        "candidate_id": "8b72281c-5ace-46cd-91c0-8af8c54bf1ce",
+        "hypothesis_id": "ead65fc9-aace-4ad4-9541-96932707c64f",
+        "signal_class": "funding-rate carry"
+      },
+      {
+        "candidate_id": "5a1a6646-8d11-43da-a8de-e9fe1628297c",
+        "hypothesis_id": "4de13b8e-671b-40fe-972c-e6c1b82b4ea0",
+        "signal_class": "funding-rate carry"
+      }
+    ],
+    "dataset_hash": "48806db72e6bd7f69d4f43d80b65effe455be70880f9f58327ebeb2bcb3529b6",
+    "descriptive": {
+      "fraction_positive": 0.95,
+      "mean_rate": 6.025314999999996e-05,
+      "n": 200
+    },
+    "evaluation": {
+      "dataset_hash": "48806db72e6bd7f69d4f43d80b65effe455be70880f9f58327ebeb2bcb3529b6",
+      "hypotheses_registered": 3,
+      "hypotheses_tested": 0,
+      "ledger_tested_elsewhere": 5,
+      "n": 200,
+      "note": "registered hypotheses consume no multiple-testing budget until tested",
+      "reasons": [
+        "span 33.0 days below 60-day gate minimum",
+        "only 1 regime leg(s), need 2"
+      ],
+      "regime_legs": [
+        "single-33d-window"
+      ],
+      "span_days": 32.99999998842593,
+      "verdict": "INCONCLUSIVE"
+    },
+    "hypotheses": [
+      "F1",
+      "F2",
+      "F3"
+    ],
+    "n_observations": 200,
+    "quality": {
+      "duplicates": 0,
+      "gaps_over_9h": 0,
+      "missing_marks": 0,
+      "n": 200,
+      "ok": true,
+      "ordered": true,
+      "reasons": [],
+      "span_days": 32.99999998842593,
+      "symbols": [
+        "BTCUSDT",
+        "ETHUSDT"
+      ],
+      "unrealistic_rates": 0
+    },
+    "verdict": "INCONCLUSIVE"
+  },
+  "gate_ledger": "research/runtime_edge_validation.sqlite3",
+  "gate_records_written": 0,
+  "holdout_consumed": null,
+  "market_db": "data/market_data.sqlite3",
+  "multiple_testing": {
+    "adjusted_threshold_now": null,
+    "adjusted_threshold_when_tested": 0.008333333333333333,
+    "base_alpha": 0.05,
+    "ledger_hypotheses_tested": 5,
+    "method": "bonferroni",
+    "new_hypotheses_registered": 6,
+    "new_hypotheses_tested": 0,
+    "note": "Registered candidates consume no budget until tested; the first future test faces alpha 0.008333."
+  },
+  "production_approved": 0,
+  "run_date": "2026-09-26"
+}

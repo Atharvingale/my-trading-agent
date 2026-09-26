@@ -1,0 +1,69 @@
+{
+  "experiment": {
+    "adjusted_significant": false,
+    "aggregate_net": -0.3884297521949331,
+    "alpha": 0.005,
+    "bootstrap_ci": [
+      -0.02358711458920981,
+      -0.009562033071326094
+    ],
+    "evidence_fingerprint": "2e74ae91f7467469b63460f847d8bff24491b36287dd44d74eba02be281d99df",
+    "failed_criteria": [
+      "positive_bootstrap_confidence_interval",
+      "independent_replication_when_refined"
+    ],
+    "ledger_m": 9,
+    "raw_p_value": 1.0,
+    "record_id": "e26e330b-22e4-4793-939e-6cf28df71121",
+    "regime_returns": {
+      "second-leg-down": -0.11031743109146208,
+      "third-leg-down": -0.2781123211034711
+    },
+    "replication_passed": false,
+    "strategy_id": "funding_carry_f4",
+    "trade_count": 24,
+    "verdict": "FAIL"
+  },
+  "frozen_holdout": {
+    "frozen": true,
+    "hash": "8a78e4146dfe4e8e3d50461e0cc0e89a2fbdd96c504f9658ab5933ac153bd2fd",
+    "holdout": [
+      1777795200003,
+      1781798400001
+    ],
+    "research": [
+      1761667200004,
+      1773734400002
+    ],
+    "validation": [
+      1773763200011,
+      1777766400005
+    ]
+  },
+  "frozen_hypothesis": {
+    "canonical": "{\"holding_periods\":1,\"hypothesis_id\":\"F4\",\"lookback\":30,\"signal_class\":\"funding-rate carry\",\"z_threshold\":2.0}",
+    "sha256": "836c56c225f5e7010535680a342308e3d826813ac98c946394e7ec4f6cd74896"
+  },
+  "holdout_hash": "36fa530f040e2a5960d09c0e34e36e9c855c887312cebee95a5a21a4be64a403",
+  "holdout_n": 280,
+  "regime_legs": [
+    {
+      "end_ms": 1779141600000,
+      "name": "first-leg-range",
+      "return": -0.018165386618059973,
+      "start_ms": 1777798800000
+    },
+    {
+      "end_ms": 1780484400000,
+      "name": "second-leg-down",
+      "return": -0.1269320957333991,
+      "start_ms": 1779141600000
+    },
+    {
+      "end_ms": 1781830800000,
+      "name": "third-leg-down",
+      "return": -0.060347826372198515,
+      "start_ms": 1780484400000
+    }
+  ]
+}
