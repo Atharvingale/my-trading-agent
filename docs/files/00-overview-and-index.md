@@ -1,8 +1,8 @@
 # Hermes — Module Index & How To Use These Files
 
-These files are **specifications**, not code. Each one describes a single module of the Hermes Autonomous Crypto Trading System (v2, edge-gated architecture) in enough detail that an AI coding agent (or a human) can implement it independently, without needing the full 30-section architecture document in context at once.
+These files are specifications for the Hermes Autonomous Crypto Trading System. The architecture is intentionally split into an **AI research/evolution plane** and a **deterministic production trading plane**.
 
-## Build order (do not reorder without updating docs/module-status.md)
+## Build order
 
 | # | File | Module | Depends on |
 |---|---|---|---|
@@ -14,25 +14,81 @@ These files are **specifications**, not code. Each one describes a single module
 | 6 | `06-risk-engine.md` | Deterministic Risk Engine | Decision Engine |
 | 7 | `07-execution-n8n-boundary.md` | n8n Execution Boundary | Risk Engine |
 | 8 | `08-order-position-lifecycle.md` | Order/Position/Trade Lifecycle | Execution Boundary |
-| 9 | `09-trade-intelligence-learning.md` | Trade Intelligence + Learning | Lifecycle module |
-| 10 | `10-memory-database-model.md` | Memory / Database Model | Cross-cutting — needed by all above |
-| 11 | `11-supervisor-runtime.md` | Supervisor / 24-7 Runtime | All of the above |
+| 9 | `09-trade-intelligence-learning.md` | Trade Intelligence + Continuous Learning | Lifecycle module |
+| 10 | `10-memory-database-model.md` | Memory / Database Model | Cross-cutting — needed by all modules |
+| 11 | `11-supervisor-runtime.md` | Supervisor / 24/7 Runtime | All active workers |
 | 12 | `12-testing-strategy.md` | Testing Strategy | Cross-cutting |
 | 13 | `13-security-requirements.md` | Security Requirements | Cross-cutting |
-| 14 | `14-coding-conventions.md` | Coding Conventions | Cross-cutting — **read this once before implementing any module**, instead of restating style preferences per session |
+| 14 | `14-coding-conventions.md` | Coding Conventions | Cross-cutting |
+| 15 | `15-candidate-generation-loop.md` | Candidate Research & Evolution | Modules 1, 9, 10, provider configuration |
 
-**Hard rule that overrides everything else in these files:** modules 4 onward (Strategy Layer, Decision Engine, Risk Engine, Execution, Lifecycle, Learning) MUST NOT run against real capital, and the Strategy Layer MUST NOT accept any strategy, until module 1 (Edge Validation Gate) has produced a passing `edge_validation_records` entry for that strategy. See `01-edge-validation-gate.md` for the currently-falsified strategy list — do not reimplement those without a materially new hypothesis.
+## Existing-code compatibility rule
 
-## docs/ folder
+**Modules 1–5 are already implemented in the existing codebase. Do not rewrite them to introduce LLM decision-making.** The changes in this revision are primarily architectural additions around those modules.
 
-`docs/module-status.md` — one row per module, current status, updated every time work starts/finishes on a module.
-`docs/implementation-log.md` — append-only log: what was actually built, when, how it differs from the spec (if it does), and what was tested. An AI agent implementing any module should add an entry here when it finishes, using the template at the top of that file.
+- Module 4 remains the only path from a validated production strategy version to live `StrategyProposal` objects.
+- Module 5 remains deterministic and does not call an LLM at decision time.
+- Module 15 adds the autonomous research/evolution plane that creates and improves candidates before they become production strategies.
+- Module 9 closes the learning loop by turning closed-trade analysis into new candidate hypotheses.
+- Module 10 persists candidate lineage and experiment history so the research process is auditable and reproducible.
+- Module 11 supervises research workers as well as the existing trading workers.
 
-**Before implementing any module, read `14-coding-conventions.md` once** — it holds the standing style/dependency preferences so they don't need to be repeated in every implementation session.
+## Two-plane architecture
 
-## Global conventions all modules follow
+```text
+AI RESEARCH / EVOLUTION PLANE
 
-- Every cross-module contract (JSON shape, DB table, API endpoint) is authoritative in the module file that owns it — don't redefine it elsewhere, reference it.
-- Every decision, order, position, and trade carries IDs that chain per the traceability requirement in `10-memory-database-model.md`.
-- Nothing in `strategies/`, `decision.py`, or `risk/` may call an LLM at decision time. LLMs are permitted only in a read-only market-intelligence/news layer (out of scope for v1 build — not covered by these files yet).
-- Fail-closed default: any ambiguous, stale, or malformed state resolves to HOLD / no new entry / halt, never to a default BUY or SELL.
+Initial seed ideas
+      ↓
+Research agents
+      ↓
+Candidate population
+      ↓
+Critique / deduplication / mutation
+      ↓
+Experiment scheduler
+      ↓
+Backtest / paper evaluation
+      ↓
+Module 1 Edge Validation Gate
+      ↓
+Human review
+      ↓
+Immutable production strategy version
+
+DETERMINISTIC PRODUCTION TRADING PLANE
+
+Production strategy versions
+      ↓
+Module 4 Strategy Proposal Layer
+      ↓
+Module 5 Decision Engine
+      ↓
+Module 6 Risk Engine
+      ↓
+Module 7 n8n boundary
+      ↓
+Module 8 Order / Position / Trade lifecycle
+      ↓
+Module 9 Trade analysis
+      ↓
+Candidate hypotheses / lessons
+      └──────────────────────────────→ AI RESEARCH PLANE
+```
+
+## Hard rules
+
+1. A **candidate hypothesis** may exist without a PASS gate record.
+2. A **production strategy** may not exist without a current `PASS` edge-validation record and the required human approval.
+3. Module 4 may load only validated production strategies.
+4. Module 5 may consume only production strategy proposals and remains deterministic.
+5. LLMs may operate in the research/evolution plane, but never directly turn a live `MarketContext` into a BUY/SELL instruction.
+6. Fail-closed behavior remains mandatory: malformed, stale, contradictory, expired, or unauthorized state produces HOLD / no new entry / halt.
+
+## Research loop rule
+
+The research loop is allowed to run repeatedly, but **expensive validation experiments are budgeted and scheduled**. The system must not repeatedly tune and retest the same hypothesis on the same holdout data.
+
+## Documentation rule
+
+`docs/module-status.md` is the summary. `docs/implementation-log.md` is append-only and records actual implementation and test results.

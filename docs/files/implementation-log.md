@@ -332,3 +332,361 @@ No spec covers a finding document; this closes the loop the stopping rule requir
 **Tests run:**
 Full suite 148 passed (nothing changed but the two added files). `git diff --check` clean (CRLF warnings only).
 
+---
+
+### [Modules 1+4] Two-plane provenance + production promotion adapter — 2026-09-26
+
+**What was implemented:**
+- `edge_validation/registry.py` — `submit_hypothesis()` now accepts optional research provenance (`candidate_id`, `parent_candidate_id`, `hypothesis_id`, `signal_class`, `source=HUMAN|AI_RESEARCH|TRADE_LEARNING`, `provider_used`, `multiple_testing_family`, `multiple_testing_threshold in (0,1)`); same validation path for human and Module 15 hypotheses. `EdgeValidationRecord` carries the 8 fields (old rows read as None/HUMAN). Added `get_provenance(record_id)` and `trace_candidate(candidate_id)` lineage walk. `_validate_provenance()` rejects empty strings and unknown sources fail-closed.
+- `edge_validation/report_writer.py` — preregistration lines now retain source/candidate/parent/hypothesis/signal/provider/MT family+threshold.
+- `candidate_generation/__init__.py` + `candidate_generation/review_queue.py` (new) — SQLite append-only review queue with no-update/no-delete triggers; `submit_for_review()` never approves, `approve()/reject()` require non-empty approver+rationale, one decision per record, `is_approved()` true only after explicit approval, `list_pending()` in submit order.
+- `strategies/production_versions.py` (new) — append-only immutable `strategy_versions` store; `create_version()` requires non-empty version/approver/rationale, duplicate version_id rejected; `get_active_version()` returns latest row.
+- `strategies/promotion.py` (new) — narrow adapter `promote_candidate()` requires live PASS for the exact record (`require_pass` match) AND `reviews.is_approved()`, then creates the immutable version. Neither condition alone suffices.
+- `strategies/registry.py` — kept `load_strategy()` PASS-only unchanged for backward compat; added `load_production_strategy()` requiring current PASS plus matching approved version (stale-record mismatch raises). Falsified Breakout/Scalping still raise explicitly in both.
+- `tests/test_promotion.py` (new, 6 tests) — Module 15 submit-like-human + provenance/report/lineage, holdout-retry blocked, unapproved blocked, PASS-without-approval blocked, approved loads, no-LLM in proposal path (adapter may reference review queue but no provider).
+
+**How it differs from the spec (if at all):**
+No divergence — narrow additions only per 00-compatibility rule. Modules 1–5 core logic untouched; no LLM in `strategies/base|proposal|calibration|registry` proposal path; no placeholder production strategies created. Seeded falsified set left as breakout/scalping to keep existing gate tests green; expanded 7-family historical list enforced via PASS+approval (all blocked with zero versions approved).
+
+**Tests run:**
+`tests/test_promotion.py` 6 passed; `test_edge_validation + test_strategy_gate + test_strategy_layer + test_decision_engine` 43 passed; full suite 154 passed (was 148). `python -m compileall -q edge_validation strategies candidate_generation`.
+
+**Open questions / follow-ups:**
+Still open per Module 15 spec: `generator.py`, `hypothesis_menu.py` (with 7-family exclusion), `multiple_testing.py` (stricter bar after N hypotheses), `provider_client.py` (env-swappable). No production versions approved; Module 4 remains correctly Blocked.
+
+---
+
+### [Module 10] Memory / Database Model — 2026-09-26
+
+**What was implemented:**
+- `memory/schemas.py` (new) — `SCHEMA_VERSION=1`, `CHAIN_ORDER` (13-stage spec order), `TABLES` (20/20 spec tables), idempotent `SCHEMA` SQL with TEXT primary keys, FK links for the full chain, indexes on symbol/time/strategy/decision legs, plus no-update/no-delete triggers on `edge_validation_records` and `strategy_versions`.
+- `memory/repository.py` (new) — `MemoryRepository` SQLite (WAL, foreign_keys=ON) with `migrate()` stamping `user_version`, `update_record()/delete_record()` refusing destructive edits, explicit `record_*` writers for all 20 tables (chain rows carry predecessor IDs), `get(table,id)`, `chain_order()`, and `trace(trade_id)` walking trade→position→order→execution→risk→decision→snapshot+edge→proposals/evidence→analysis→lesson→version (lesson-first, edge-fallback for versions) in spec order or raising `TraceNotFoundError`.
+- `memory/__init__.py` — exports `MemoryRepository`.
+- `tests/test_memory_model.py` (new, 7 tests) — synthetic end-to-end trace with linkage assertions and key-order check, 20-table existence, supporting-table roundtrip, edge append-only (SQL + layer), versions append-only (SQL + layer), unknown-trade raises, migrate idempotent/versioned.
+
+**How it differs from the spec (if at all):**
+No divergence. New unified store only — existing `MarketStore`, `edge_validation.registry`, `review_queue`, `production_versions` left untouched per 00-compatibility rule. Supporting tables (candles/breadth/derivatives/universe/health/metrics/raw events) persist outside the per-trade path but roundtrip via `get()`. `lessons` allows many rows per analysis with latest-wins; `trade_analysis` is one-per-trade (UNIQUE). No new dependencies (stdlib sqlite3 only).
+
+**Tests run:**
+Unit/Integration per 12-testing-strategy.md: `tests/test_memory_model.py` 7 passed; full suite 161 passed (was 154). `python -m compileall -q memory tests/test_memory_model.py`; `git diff --check` clean (CRLF warnings only). No `sorted()`, no comprehensions, no `__main__` guards in new code.
+
+**Open questions / follow-ups:**
+None for Module 10. Future modules 6–9 should write through this repository so live traces accumulate; a read-only migration from legacy `MarketStore`/`runtime_edge_validation.sqlite3` rows was deliberately not added — import only when a consumer needs it.
+
+**Storage engine:** SQLite (WAL). **Migration approach:** additive idempotent `migrate()` via `CREATE TABLE/INDEX/TRIGGER IF NOT EXISTS` + `PRAGMA user_version=SCHEMA_VERSION`; reopening upgrades without loss. **trace() result:** synthetic `trade-001` returns all 13 stages in order with predecessor IDs verified.
+
+---
+
+### [Module 15] Candidate Generation Loop — 2026-09-26
+
+**What was implemented:**
+- `candidate_generation/hypothesis_menu.py` (new) — `INITIAL_APPROVED` funding-rate carry + cross-exchange dislocation; `EXCLUDED` 8 falsified patterns with Module 1 reasons; normalized matching plus repackaged-substring guard; `HypothesisMenu` with `check()/require_allowed()/is_allowed()`, `add_with_approval()` requiring approver+rationale (persisted, append-only), `list_approved()/list_excluded()`.
+- `candidate_generation/multiple_testing.py` (new) — Bonferroni `required_significance(base/total)`, `count_hypotheses()` from live `edge_validation_records` HYPOTHESIS rows (registry or db path), `adjusted_threshold()` returning method/family/base/total/required, `meets_adjusted_bar()`.
+- `candidate_generation/provider_client.py` (new) — stdlib `urllib` JSON POST `propose_hypothesis(prompt, api_url, api_key, model_name)` plus `load_config_from_env()` (`CANDIDATE_PROVIDER_URL/_API_KEY/_MODEL`, never hardcoded) and `propose_from_env()`; non-JSON/non-object raises for fail-closed logging.
+- `candidate_generation/generator.py` (new) — `CandidateHypothesis` per spec contract plus candidate/parent lineage; `CandidateGenerator` SQLite audit (`candidates` append-only, `rejected_responses`, `preregistrations` linkage table) with weekly `min_interval_seconds` schedule + `max_candidates` budget, `should_run()/check_schedule()`, `build_prompt()` naming approved classes only, `run_once()`/`generate_from_response()` fail-closed (malformed→REJECTED row + None; excluded→EXCLUDED row, never gated), `preregister()` through identical Module 1 path with live Bonferroni threshold as provenance. No imports from `strategies/`, `risk/`, `execution/` — cannot wire anything.
+- `candidate_generation/__init__.py` — full exports. `review_queue.py` unchanged (already append-only, never auto-promotes).
+- `tests/test_candidate_generation.py` (new, 11 tests) — excluded Breakout repackaging rejected pre-gate, menu sign-off rules, MT 0.05 vs 0.005 + live-ledger growth, PASS-without-approval never wires (no `strategies/<name>.py`), two-mock-server env swap, 5 malformed payloads rejected, schedule/budget respected, full audit permanence, no-wiring-imports scan.
+
+**How it differs from the spec (if at all):**
+Two narrow, logged choices: (1) stdlib `urllib` instead of `aiohttp` for the POST — same env-swappable behavior, keeps the module dependency-free per 14-conventions (`aiohttp` stays approved but unused here); (2) `preregistrations` companion table instead of mutating the append-only `candidates` ledger to record gate linkage. No LLM in Module 4/5 paths; existing promotion adapter unchanged.
+
+**Tests run:**
+Unit/Contract/Integration per 12-testing-strategy.md: `tests/test_candidate_generation.py` 11 passed; full suite 172 passed (was 161). `python -m compileall -q candidate_generation tests/test_candidate_generation.py`; `git diff --check` clean (CRLF warnings only). No `sorted()`, no comprehensions, no `__main__` guards in new code.
+
+**Open questions / follow-ups:**
+None for Module 15 scaffolding. Live use still needs a dated human-approved holdout per experiment and an operator-set `CANDIDATE_PROVIDER_*` endpoint; the loop proposes at most weekly by default and every proposal still faces the full gate + human review.
+
+**Initial menu:** funding-rate carry, cross-exchange dislocation. **Correction method:** Bonferroni (`required = 0.05 / total_including_current`). **Providers used/tested:** two local mock HTTP endpoints via env swap (no vendor SDK); production provider is a config change, not a code change.
+
+---
+
+### [Module 6] Deterministic Risk Engine — 2026-09-26
+
+**What was implemented:**
+- `risk/limits.py` (new) — frozen `RiskLimits` dataclass (all thresholds config-driven, validated positive in `__post_init__`) plus pure `check_*` functions for symbol/portfolio exposure, concurrent positions, daily loss, drawdown, leverage, stop distance, liquidity/depth/spread, and stop-out cooldown.
+- `risk/position_sizing.py` (new) — `calculate_quantity()` exact deterministic sizing: risk_amount = equity × risk_per_trade, quantity = risk_amount / |entry − stop|, then capped by position-notional and depth budgets in a fixed order. Raises on non-positive inputs; never rounds downstream.
+- `risk/engine.py` (new) — `RiskEngine` with fixed rule order (kill → HOLD → stale context → symbol → expiry → duplicate → cooldown → existing position → reference/stops → stop distance → sizing → min-notional floor → exposure → positions → daily loss → drawdown → leverage → liquidity). `RiskDecision` per spec contract plus `integrity_hash` (SHA-256 over canonical JSON); `verify_integrity()` recomputes it for Module 7. Kill switch (`activate/clear/is_halted`, manual clear needs approver+rationale), duplicate `decision_id` set, per-symbol stop-out cooldown map. HOLD returns auditable REJECTED with zero quantity.
+- `risk/__init__.py` — exports. `tests/test_risk_engine.py` (new, 23 tests) — happy-path approval, stale-context rejection, HOLD no-action, tamper detection (quantity + stop), kill-switch block/clear validation, and pass+reject paths for all 11 checks plus expiry/symbol/duplicate/position/cooldown/liquidity/spread, config-driven validation, exact sizing math, no-LLM/execution-imports scan.
+- One design fix during testing: depth-capped sizing could shrink orders to dust on thin books (and collapse strict-notional tests to $1 approvals), so a `min_order_notional` floor (default 10.0) rejects sub-minimum orders instead of rounding up.
+
+**How it differs from the spec (if at all):**
+Two additive extras, both logged: (1) `integrity_hash` on `RiskDecision` beyond the 8 spec fields — required to enforce the critical invariant (exact quantity to execution); (2) `min_order_notional` floor — required so thin-book orders reject instead of dust-sizing. No new dependencies (stdlib only). Modules 10 and 15 untouched (verified via `git status`: only `risk/`, `tests/test_risk_engine.py`, status/log files changed).
+
+**Tests run:**
+Unit per 12-testing-strategy.md: `tests/test_risk_engine.py` 23 passed; full suite 195 passed (was 172). `python -m compileall -q risk tests/test_risk_engine.py`; `git diff --check` clean (CRLF warnings only). No `sorted()`, no comprehensions, no `__main__` guards in new code.
+
+**Open questions / follow-ups:**
+None for Module 6. Module 7 must call `verify_integrity()` before sending and must never recalculate quantity.
+
+**Launch limit values:** per-symbol 1000.0, portfolio 3000.0, total 3000.0, max positions 3, daily loss 200.0, drawdown 0.10, leverage 1.0, risk/trade 0.01, stop 10–500 bps, spread 25 bps, depth fraction 0.25, min notional 10.0, cooldown 3600s.
+**Kill switch:** `activate_kill_switch(reason)` rejects everything; `clear_kill_switch(approver, rationale)` resumes (both non-empty required).
+**Quantity-integrity result:** tampered quantity (+1.0) and tampered stop (+5.0) both fail `verify_integrity()`; untouched approvals pass.
+
+---
+
+### [Module 7] n8n Execution Boundary — 2026-09-26
+
+**What was implemented:**
+- `execution/n8n_client.py` (new) — `ExecutionRequest` per spec contract (idempotency_key == execution_id); `build_request()` verifies `verify_integrity()`, requires APPROVED, copies quantity verbatim (no quantity parameter exists), validates symbol/side/order-type/expiry independently; `assert_quantity_matches()` exact-equality defense in depth (1e-9 drift raises), re-checked in `submit_request()` when the sealed decision is passed; `submit_request()` order is kill-switch → expiry (clock-injected `now`) → field validation → HMAC sign → sender, with `N8nUnavailableError` on transport failure and `RequestExpiredError` without ever sending late; `ExecutionConfig.from_environment()` enforces paper/production separation (exactly one pair present, loud fail on ambiguity); `default_sender()` stdlib HTTPS POST (tests inject fakes); `sign/verify_webhook_signature()` HMAC-SHA256 with timestamp skew window + nonce set for replay protection; secrets never logged.
+- `execution/order_manager.py` (new) — `ExecutionOrderManager` SQLite ledger (append-only, no-delete trigger); `register()` idempotent; `submit_once()` sends at most once per execution_id (terminal/cached states return `duplicate_suppressed` without touching the network); transport failure marks EXPIRED and raises; `mark_acked/filled/rejected/expired()`, `list_by_state()`.
+- `execution/reconciliation.py` (new) — pure `reconcile(local, exchange)` matching on order/execution/idempotency keys; reports matched/missing_on_exchange/unknown_locally/mismatched with action `ok` vs `freeze_new_entries` on unknown or mismatched truth.
+- `execution/__init__.py` — exports. `tests/test_execution_boundary.py` (new, 20 tests) — unit (exact copy, tamper/non-approved/symbol/side/type rejection, 1e-9 + rounding drift, expiry boundary + late, kill-switch-halts-healthy, signature roundtrip/replay/tamper/stale/wrong-secret, secret-absence + no-logging-imports, config separation/ambiguity), contract (per-field independent validation, 11-field webhook schema), integration (entry flow to matched reconciliation, outage expiry without queueing or resend, close-intent characterization, no-LLM/no-sizing scan).
+
+**How it differs from the spec (if at all):**
+Two additive extras, both logged: (1) `assert_quantity_matches()` + optional `risk_decision` re-verification on submit — the spec's quantity invariant enforced at build AND submit; (2) kill-switch flag threaded through `submit_request()`/`submit_once()` so the halt works even when the decision layer is hung (Module 13 independence). No new dependencies (stdlib only). Modules 10 and 15 untouched; Module 6 untouched (`git status` shows no `risk/` modification).
+
+**Tests run:**
+Unit/Contract/Integration per 12-testing-strategy.md: `tests/test_execution_boundary.py` 20 passed; full suite 215 passed (was 195). `python -m compileall -q execution tests/test_execution_boundary.py`; `git diff --check` clean (CRLF warnings only). No `sorted()`, no comprehensions, no `__main__` guards in new code.
+
+**Open questions / follow-ups:**
+Module 6 semantic probe (no code change, per instruction): `test_close_intent_while_holding_is_currently_rejected` pins that risk rejects ANY decision while `position_qty != 0` — including a SELL that would close a long. Entry-vs-close distinction belongs to Module 8's order/position lifecycle; until then the conservative block stands and Module 7 only ever submits flat-state entries.
+
+**Webhook auth/signing scheme:** HMAC-SHA256 over `timestamp_ms + nonce + canonical-JSON(payload)`; headers `X-Signature/X-Timestamp/X-Nonce/X-Idempotency-Key`; 300s skew window; nonce set rejects replays.
+**Idempotency key format:** `exec_<16 hex>` == `execution_id`, stored UNIQUE, returned on duplicates without resend.
+**Expiry-enforcement result:** late submit (+61s past 60s expiry) raises `RequestExpiredError` with zero sender calls; boundary instant submits; outage marks EXPIRED with exactly one sender attempt and cached retries.
+
+---
+
+### [Module 8] Order, Position, and Trade Lifecycle — 2026-09-26
+
+**What was implemented:**
+- `models/execution.py` (new) — `OrderState` (NEW/PARTIALLY_FILLED/FILLED/CANCELED/REJECTED/SUBMISSION_UNKNOWN) with a closed `TRANSITIONS` table (unknown exits only via reconciliation, terminal states have no exits); `Fill` (price/qty/fee/funding/latency/expected + `slippage_bps()`); `Order` (chain IDs, `apply_fill()` driving NEW→PARTIAL→FILLED with overfill protection, `mark_unknown()`, `remaining()`, `to_dict()`).
+- `models/trade.py` (new) — `Position` (entry/exit prices, quantities, exposure, realized/unrealized PnL, fees/funding, MFE/MAE, slippage/latency averages, duration, amendments, reconcile state, mark path) and frozen `Trade` (`net_pnl()` net of fees/funding); pure `position_pnl()` + `excursion()` (non-negative MFE/MAE magnitudes) helpers.
+- `monitoring/positions.py` (new) — `LifecycleTracker` SQLite ledger (orders/fills/positions/trades, no-delete triggers; UPDATEs allowed — it is a state machine, not an audit log): `place_order()` with ENTRY/REDUCE/CLOSE intents, `apply_fill()` opening/extending/realizing, `mark_price()` refreshing MFE/MAE, `stop_state()` (ARMED/STOP_HIT/TARGET_HIT), `mark_unknown()`/`resolve_unknown()` (guessed resolutions raise), `reconcile_from_exchange()` adopting exchange truth (missed fills synthesized from real exchange records, unknown resolved or canceled), `may_enter()`/`classify_intent()`, `get_chain()` (decision→execution→order→position→exit→trade), `amend_order()` (counted, quantity never rewritten). Memory mirroring uses existing `record_order/record_position/record_trade` only (order at placement, position at open, trade at close with analytics payload).
+- `models/__init__.py`, `monitoring/__init__.py` — exports. `tests/test_lifecycle.py` (new, 12 tests) — state-machine legal/illegal jumps, unknown-needs-reconcile, synthetic-path MFE/MAE/slippage/PnL, partial-fills→position→close→trade with full chain, reduce-then-close quantities + oversize rejection, stop/target marks, unknown-blocking + resolve paths, missed-fill recovery, restart rebuild, memory mirroring with FK-coherent chain, risk→execution→lifecycle close flow.
+- Two real findings fixed during testing (no protected-module changes): (1) reconcile re-resolved orders whose fills had already cleared unknown — fixed by reloading state and counting fill-path resolutions; (2) memory mirroring hit FK guards with orphan execution IDs — resolved by seeding the coherent upstream chain in the test (snapshot→edge→decision→risk→execution), proving the Module 10 contract works as designed.
+
+**How it differs from the spec (if at all):**
+Spec paths followed verbatim (`monitoring/positions.py`, `models/execution.py`, `models/trade.py`). One additive extra, logged: ENTRY/REDUCE/CLOSE intents + `may_enter()/classify_intent()` — this resolves the Module 6 close-intent question at the lifecycle layer (closes/reduces flow as opposite-side exit orders capped at open quantity; same-side adds stay blocked) with zero changes to risk, execution, memory, or candidate_generation (`git status` confirms). No new dependencies (stdlib only).
+
+**Tests run:**
+Unit/Lifecycle/Reconciliation/Integration per 12-testing-strategy.md: `tests/test_lifecycle.py` 12 passed; full suite 227 passed (was 215). `python -m compileall -q models monitoring tests/test_lifecycle.py`; `git diff --check` clean (CRLF warnings only). No `sorted()`, no comprehensions, no `__main__` guards in new code.
+
+**Open questions / follow-ups:**
+None for Module 8. Module 9 (trade intelligence) consumes closed `Trade` rows and MFE/MAE/slippage analytics from here.
+
+**Reconciliation triggers:** on-restart ledger reopen (`reconcile_from_exchange` after restart), configurable poller calls the same function on an interval, on-gap-detection (fill IDs present on exchange but absent locally are synthesized), and any SUBMISSION_UNKNOWN row (resolved or canceled from confirmed truth only).
+**Recovery-test result:** missed second fill recovered (PARTIAL→FILLED, position at full quantity, 1 recovered fill); restart with unknown + late fill resolved (unknown cleared, position opened); unknown blocks entries (placement raises) until `resolve_unknown` clears the symbol.
+
+---
+
+### [Module 9] Trade Intelligence and Continuous Learning — 2026-09-26
+
+**What was implemented:**
+- `learning/trade_analyzer.py` (new) — rule-based `analyze_trade()` answering all 12 post-trade questions from explicit evidence flags (context_valid, gate_record_ok, approved_quantity, regime_fit) in fixed priority (GATE → DATA → RISK → EXECUTION → REGIME → SIGNAL → NORMAL); `TradeAnalysis` with category, actionable flag, candidate hypothesis, and spec-table recommended action. Unknown plumbing fails toward DATA/investigate, never NORMAL. No LLM.
+- `learning/lesson_engine.py` (new) — `LessonEngine` SQLite bank; `propose()` banks only actionable non-NORMAL analyses (NORMAL returns None); `validate()/reject()` need a human approver, decided once (UPDATE forbidden; adjudication consumes the row atomically); `counts()` per status.
+- `learning/backtester.py` (new) — adapter over proven Module 1 machinery: `run_family_backtest()` dispatches known families to `edge_validation.experiment` causal backtesters (hint only — the gate delivers verdicts), unknown classes return INCONCLUSIVE with no invented simulator; `evaluate_trade_returns()` scores streams with `ExperimentEvidence` (net + bootstrap CI + fingerprint).
+- `learning/paper_engine.py` (new) — thin adapter over `paper_trading.PaperEngine`: `run_paper_leg()` replays candidate orders against snapshots, returning fills, per-order reports, slippage totals, and portfolio snapshot. Zero duplicated simulation math.
+- `learning/promotion.py` (new) — `promote_candidate()` requires a VALIDATED lesson then delegates to `strategies.promotion` (live PASS + review approval into an immutable version), so missing/non-PASS records raise and no parallel path exists; `StrategyStatus` pointer registry (`set_active`/`rollback`/`disable`/`enable` + audited history) with version rows never edited or deleted.
+- `learning/__init__.py` — exports. `tests/test_learning.py` (new, 11 tests) — promotion refusal (missing/FAIL/unvalidated), single-loss config invariance, instant rollback + history-preserving disable, 7-category priority, lesson counts/adjudication, backtester dispatch + evidence scoring, paper determinism, full pipeline promotion, no-LLM scan.
+
+**How it differs from the spec (if at all):**
+Adapters reuse instead of rebuild (`edge_validation.experiment/evidence`, `paper_trading`, `strategies.promotion`, `ProductionVersionStore`, `ReviewQueue`) — no protected module modified (`git status` confirms: only `learning/`, `tests/test_learning.py`, status/log are new/changed). One structural note, logged: lesson adjudication is DELETE+INSERT (UPDATE trigger forbids edits) preserving full content plus decision. No new dependencies (stdlib only).
+
+**Tests run:**
+Unit/Learning per 12-testing-strategy.md: `tests/test_learning.py` 11 passed; full suite 238 passed (was 227). `python -m compileall -q learning tests/test_learning.py`; `git diff --check` clean (CRLF warnings only). No `sorted()`, no comprehensions, no `__main__` guards in new code.
+
+**Open questions / follow-ups:**
+None for Module 9. Live operation still needs dated human-approved holdouts per candidate and operator review of VALIDATED lessons before gate submission.
+
+**Candidate lessons in initial testing:** 7 proposed across the test run, 1 promoted to a production version (full-pipeline test), 1 rejected, 4 validated-but-unpromoted (refusal-path fixtures proving the gate holds), 1 left pending (unvalidated-refusal fixture). Zero gate bypasses.
+**Rollback-test result:** `rollback()` re-pointed v2→v1 in one pointer write, far inside the 5s bound (ms-scale), with 4+ audited history events; disable preserved both version rows intact.
+
+---
+
+### [Module 11] Supervisor and 24/7 Runtime — 2026-09-26
+
+**What was implemented:**
+- `supervisor.py` (new, top-level per spec) — `Supervisor` with asyncio task supervision: per-worker factories (fresh coroutine per restart), isolated crash handling (only the crashed worker restarts, siblings continue), exponential backoff, `rebuild()` gating `allow_decisions()` (no decision until portfolio state is rebuilt from the hook), `restart_down_workers()` for hung workers via health, independent kill hook (`trip_kill_switch` works with zero workers running), bounded `run_once()` for tests/dry runs, audited event log.
+- `monitoring/health.py` (new) — `HealthMonitor` (HEALTHY/DEGRADED/DOWN/UNKNOWN from heartbeat age + failure streak, all 8 spec workers plus ad-hoc), `snapshot()`/`down_workers()`, binding `required_response()`/`evaluate_conditions()` covering all 11 failure-table rows (unknown fails closed to HOLD), `hold_for_stale_symbols()` directive.
+- `tests/test_supervisor.py` (new, 10 tests) — crash-isolation restart with uninterrupted sibling, backoff growth + cap, stale→system-wide HOLD (context + directive + monitor DOWN), restart rebuild gating (closed before, exact state after; failed rebuild keeps gate closed), all 11 table rows + fail-closed unknown, thresholds + hung-worker restart, kill-hook independence, worker-name contract, banned-constructs scan.
+
+**How it differs from the spec (if at all):**
+No divergence. New files only — no existing module modified (`git status` confirms: only `supervisor.py`, `monitoring/health.py`, `tests/test_supervisor.py`, status/log are new/changed). No new dependencies (stdlib asyncio only).
+
+**Tests run:**
+Unit/Integration/Failure-injection per 12-testing-strategy.md: `tests/test_supervisor.py` 10 passed; full suite 248 passed (was 238). `python -m compileall -q supervisor.py monitoring tests/test_supervisor.py`; `git diff --check` clean (CRLF warnings only). No `sorted()`, no comprehensions, no `__main__` guards in new code.
+
+**Open questions / follow-ups:**
+None for Module 11. Live deployment still needs the operator to wire real worker coroutines (observer/collector loops), a real rebuild hook (exchange truth + durable records), and a kill hook into the risk engine; defaults are safe (gate closed until first rebuild succeeds).
+
+**Process/orchestration technology:** stdlib asyncio task supervision (same mechanism as the market-data collector's background tasks) — no systemd/Docker dependency in code; those remain deployment choices.
+**Restart-backoff parameters:** initial 1.0s, factor 2.0, max 60.0s per worker (consecutive-crash exponent, capped); clean exits are not relaunched.
+**Restart-recovery test result:** crashed worker restarted (≥1 restart, sibling ticks uninterrupted); rebuild gate closed before hook success with exact pre-restart portfolio state after; failed rebuild (exchange unreachable) keeps the gate closed.
+
+---
+
+### [Module 12] Testing Strategy — 2026-09-26
+
+**What was implemented (harness, not a service — the spec defines the bar):**
+- `tests/test_levels.py` (new, 2 tests) — executable `LEVEL_COVERAGE` registry (11 spec levels → covering files) plus `MODULE_LEVELS` matrix (modules 01–11 and 15 → relevant levels); fails if any covering file is deleted or any module loses its level. This is what makes "no module is done until…" enforceable instead of aspirational.
+- `tests/test_soak.py` (new, 1 test) — bounded 200-cycle market→context→decision→risk soak with deterministic walk and induced disconnects every 50th cycle: zero exceptions, 200/200 HOLD + REJECTED, 4 disconnects absorbed, zero positions/trades/fills/orders left behind.
+- `tests/test_failure_injection.py` (new, 5 tests) — WS disconnect → HOLD + risk reject; n8n outage → EXPIRED with no position; Binance rejection ack → never ACKED, never a fill; kill switch refuses even pre-built healthy requests with zero sender calls; tampered in-flight decision refused at the boundary.
+- `tests/test_backtest_validation.py` (new, 4 tests) — final-candle spike books zero trades (causal next-open execution), entry/exit index discipline, byte-identical reruns, stable-and-sensitive dataset SHA-256.
+- `tests/test_venue_integration.py` (new, 2 tests) — n8n boundary into the paper venue: approved quantity fills exactly with cash movement; thin book PARTIALs without overfill.
+- Pre-existing coverage retained and mapped: edge validation, unit, contract, integration, lifecycle, reconciliation, learning suites all keep passing under the registry.
+
+**How it differs from the spec (if at all):**
+No divergence. Test files only — zero source files touched (`git status` confirms). Live 24h/72h wall-clock soak and real testnet execution remain operator activities; the bounded soak and paper-venue integration are their CI-runnable analogues (same precedent as Module 2's simulated soak). No new dependencies.
+
+**Tests run:**
+Soak/Failure-injection/Backtest-validation/Execution-integration per the Module 12 table itself: 14 new tests passed; full suite 262 passed (was 248). `python -m compileall` on the five new files; `git diff --check` clean (CRLF warnings only). No `sorted()`, no comprehensions, no `__main__` guards in new code.
+
+**Open questions / follow-ups:**
+None for Module 12. The registry must be extended if a new level or module is ever added — `test_levels.py` fails loudly until it is.
+
+**Per-module levels exercised (the Module 12 "When done" record):**
+01 Edge Gate: edge_validation + backtest_validation. 02 Market Data: unit + contract + soak. 03 Observer/Context: unit + contract + integration. 04 Strategy Layer: unit. 05 Decision Engine: unit + contract + integration. 06 Risk Engine: unit. 07 Execution: unit + contract + execution_integration + failure_injection. 08 Lifecycle: unit + lifecycle + reconciliation + integration. 09 Learning: unit + learning. 10 Memory: unit + reconciliation. 11 Supervisor: unit + integration + failure_injection + soak. 15 Candidate Generation: unit + learning.
+
+---
+
+### [Module 13] Security Requirements — 2026-09-26
+
+**What was implemented (bar, not a service — central enforcement for the spec):**
+- `security/credentials.py` (new) — `load_binance_credentials()` with `HERMES_EXEC_ENV`-selected paper/production pairs (both present → loud refusal), key+secret togetherness, mandatory `HERMES_BINANCE_KEY_SCOPE=read-only` and `BINANCE_WITHDRAWALS_DISABLED` attestation, anonymous public-data mode when no keys; `audit_market_data_settings()` checking an existing Settings object (key/secret pairing, scope + withdrawals attestation, non-loopback token+TLS, insecure-remote flag) without changing Module 2 code.
+- `security/redaction.py` (new) — `redact()` (auth headers, bearer tokens, signed-URL params, labeled secrets, 64+ hex blobs, plus known secret values), `scrub_mapping()` (sensitive keys + nested), `SecretFilter` logging filter for args dict/tuple and message forms.
+- `tests/test_security.py` (new, 12 tests) — redaction units, filter forms, signed-run log lint (caplog), repo-wide hardcoded-secret scan, hung-layer kill, Binance ambiguity/scope/attestation/anonymous/half-pair, settings audit (loopback clean, exposed findings, insecure flag), n8n separation via existing config.
+- Two real findings fixed during testing (new code only): (1) groupless regex crashed the `\1` replacement — replaced with a match-function keeping the label prefix; (2) the source scan flagged env-var-name constants (`ENV_API_KEY = "CANDIDATE_PROVIDER_API_KEY"`) — narrowed to skip SCREAMING_SNAKE RHS values, which are routing, not secrets.
+
+**How it differs from the spec (if at all):**
+No divergence. New `security/` package + one test file only — zero existing modules modified (`git status` confirms). Withdrawals-disabled is enforced as a load-time attestation (code cannot inspect Binance account settings); the borrow-check is the operator setting `BINANCE_WITHDRAWALS_DISABLED=1` only on a key created withdrawal-disabled. No new dependencies (stdlib logging/re/os only).
+
+**Tests run:**
+Per the Module 13 acceptance criteria, executed literally: log-lint (caplog over a signed run + source scan), hung-layer kill, ambiguity refusal. `tests/test_security.py` 12 passed; full suite 274 passed (was 262). `python -m compileall -q security tests/test_security.py`; `git diff --check` clean (CRLF warnings only). No `sorted()`, no comprehensions, no `__main__` guards in new code.
+
+**Open questions / follow-ups:**
+None for Module 13. Operators must still create the Binance keys withdrawal-disabled and keep `.env` out of source control (`.env.example` remains the only committed template).
+
+**Secret-management mechanism:** environment variables only — disjoint `*_PAPER` / `*_PROD` pairs selected by `HERMES_EXEC_ENV`, read-only scope + withdrawals attestation required, every log line scrubbable through `SecretFilter`.
+**Kill-switch independence test result:** decision layer hung on a never-signaled event while the main thread tripped the switch via the supervisor hook (no deadlock, bounded join); risk then REJECTED with kill-switch reason — halt provably independent of Hermes health.
+
+---
+
+### [Integration] End-to-End Runtime Wiring — 2026-09-26
+
+**Integration map (from source, not docs):** disconnected market→observer feed, no strategy runner (approvals had no code path to proposals), unchained decision→risk→execution→lifecycle→learning stages, dummy-only supervisor workers, no rebuild hook, no account-state builder, no venue transport. No fake/mock paths reachable from production; no secret logging; no unsafe fallbacks found. Module 7 request/ack ledger and Module 8 order/fill/position ledger are complementary (different granularity) — documented, not merged.
+
+**What was wired (new `runtime/` package only — zero existing modules modified):**
+- `runtime/config.py` — `RuntimeConfig` paper-by-default (`HERMES_EXEC_ENV` unset → paper); production boot refuses without explicit `HERMES_LIVE_TRADING=1`; per-store SQLite paths under one data dir.
+- `runtime/paper_venue.py` — `PaperN8nServer` verifying HMAC + replay/nonce + idempotency for real, then filling exact quantities via `PaperEngine`; `make_paper_sender()` adapts it to the Module 7 sender signature. No live Binance path exists.
+- `runtime/pipeline.py` — `HermesPipeline`: `step_market()` (duplicate/out-of-order/malformed-safe) → observer → approved-version signals → `decide()` → risk (full account state from tracker + settled equity) → sealed request → `submit()` (n8n boundary + execution mirror) → `on_venue_fills()` (lifecycle ENTRY) → `close_position()` (CLOSE intent reusing entry linkage — no fabricated risk/execution rows) → `learn_from_trade()` (gate provenance resolved from memory, analysis + lesson + version mirrored) → `research_step()` (validated lessons only, review inbox PENDING, never approval). HOLD cycles persist nothing (no edge link to join — fail-closed persistence, not a gap). Test-signal registry is instance-level, `test_`-prefixed, and `assert_no_test_signals()` blocks production boot with fixtures.
+- `runtime/workers.py` — eight real queue-driven stage workers (bounded backpressure queues, shared heartbeat, injectable feed/submit/exchange-truth) calling the same pipeline primitives as the sync path; no duplicated stage logic.
+- `runtime/recovery.py` — ordered rebuild (durable counts → execution ledger → lifecycle reconcile → account reload from metrics); any exception or leftover unknown → frozen, never resume-on-guess.
+- `tests/test_runtime_integration.py` (new, 16 tests) — full paper lifecycle with ID preservation + lesson + preregistration + complete `memory.trace()`; stale negative (nothing submitted, no position); hung-decision kill (bounded, risk REJECTED); Module 1 block (activation refused, zero approvals/submits); production guards (test-signal + live-flag refusal); malformed/duplicate/expired/tampered/unknown/partial/cancel/restart-pending/rebuild-freeze paths; supervisor running all eight real workers; research validation gate.
+
+**Runtime flow:** market event → observer.refresh_once → approved signals → decide → persist chain → risk → build_request → manager.submit_once → paper venue ack → lifecycle ENTRY + fills → CLOSE → trade → analyzer → lesson → (human validation) → generator → Module 1 → review PENDING → (human approval) → immutable version → production signal. Supervisor orchestrates workers, owns rebuild + kill hooks.
+**Worker architecture:** market_observer → context_builder → strategy_engine → decision_engine → risk_engine → n8n_client → trade_monitor → learning_worker over seven bounded asyncio queues into shared stores.
+**Restart behavior:** `recover()` reconciles durable + ledger + orders/fills/positions, reloads account, freezes symbols with residual unknown; supervisor gates decisions until ready.
+**Persistence/reconciliation:** Module 10 tables written in dependency order (snapshot → edge mirror → decision → proposals → evidence → risk → execution → order → position → trade → analysis → lesson → version); Module 7 and Module 8 ledgers kept distinct by design.
+**Failure behavior:** every injected fault resolves to HOLD/REJECTED/EXPIRED/FREEZE per existing semantics; close-intent exits flow through lifecycle CLOSE while Module 6's entry block stands untouched.
+
+**Tests run:** `tests/test_runtime_integration.py` 16 passed; full suite 290 passed (was 274, baseline preserved). `python -m compileall -q runtime tests/test_runtime_integration.py`; `git diff --check` clean; `git status` shows only `runtime/`, `tests/test_runtime_integration.py`, `tests/test_levels.py`, status/log as new/changed. No `sorted()`, no comprehensions, no `__main__` guards, stdlib only.
+
+**Remaining genuine blockers (not code gaps):** (1) zero real Module 1 PASS verdicts — production strategy set is empty by evidence, not by wiring; (2) no live n8n server / Binance execution configured — paper venue is the only transport; (3) research loop needs operator provider credentials + dated holdouts per candidate; (4) live deployment needs real worker feed, exchange-truth source, and rebuild/kill hook wiring to operator infrastructure.
+
+---
+
+### [Module 1 Research] Funding-Rate Carry + Cross-Exchange Dislocation — 2026-09-26
+
+**Data audit (read-only over `data/*.sqlite3`, all gitignored local collectors):**
+- Funding: 200 distinct (symbol, fundingTime) observations (BTCUSDT/ETHUSDT, 100 8h-periods each, 33.0-day span) with mark prices; execution prices available (160k bookTicker, 6882 klines, same window).
+- Cross-exchange: 8421 deduplicated confirmations (7806 CONFIRMED, 615 UNAVAILABLE skipped, 3–4 venues: binance/coinbase/kraken/okx, real reference prices) but aggregates only — no per-venue bid/ask, spreads, depth, fee schedules, or latency; span ~4.4 days.
+- Data-quality gate: both series ordered, deduplicated on load, no unrealistic rates, no missing marks, no impossible spreads; quality `ok:true` on both — the blocker is sufficiency, not cleanliness.
+- Reproducibility note: `data/` is untracked, so every finding carries a dataset SHA-256 (funding `48806db7…`, xex `217c5c5c…`, full hashes in artifact).
+
+**What was implemented (new `research/` package + one test file — zero existing modules modified):**
+- `research/funding_carry.py` — `FundingObservation`, 3 bounded hypotheses (F1/F2 short-carry thresholds, F3 mirror long), causal T→T+1 engine with exact project costs (0.10%/side fee+slippage, 31.2% tax, 1% TDS), quality gate, `evaluate_sufficiency()` (≥20 periods, ≥60d span, ≥2 regime legs), DB loader with dedup.
+- `research/dislocation.py` — `DislocationObservation`, 3 bounded hypotheses (D1/D2/D3 threshold×persistence), `check_executability()` naming the 6 missing legs, descriptive crossing counts (never returns), same sufficiency bar (≥500 obs, ≥60d, 2 legs).
+- `research/run_validation.py` — operator-invoked `main()` registering all 6 hypotheses via `CandidateGenerator` (menu-approved classes), running audit + evaluation, writing `research/reports/funding_xex_validation.json/.md`. No gate writes, no holdout touched, no promotion.
+- `tests/test_funding_xex_validation.py` (new, 14 tests) — registration, determinism, future-spike no-look-ahead (both engines), exact cost math, quality flags, READY/INCONCLUSIVE branches, Bonferroni accounting (registered≠tested), ledger-untouched registration, production block, no-LLM scan.
+
+**Hypotheses tested (all pre-registered before performance inspection):**
+F1 short>0.01%/3-period/1-hold; F2 short>0.05%+calm filter; F3 long<−0.01%; D1 ≥5bps×3/1h; D2 ≥10bps×3/1h; D3 ≥20bps×5/2h. Costs: 0.10%/side fee+slippage, 31.2% VDA tax, 1% TDS drag.
+
+**Statistical results:** no inferential stats run (no qualifying dataset). Descriptive: funding mean rate +0.006%/8h, 95% positive periods (n=200); xex disagreement p50 2.60 / p90 4.26 / p99 5.84 bps (n=8421). Multiple testing: ledger tested m=5, 6 registered / 0 tested, budget unspent; first future test faces Bonferroni alpha 0.05/6≈0.00833.
+
+**Holdout results:** none defined, none consumed — nothing qualified as evidence-grade data.
+
+**Module 1 verdicts:** F1/F2/F3 INCONCLUSIVE (33d < 60d minimum, single regime leg); D1/D2/D3 INCONCLUSIVE (no executable per-venue quotes, ~4.4d span, single leg). Gate ledger: 0 records written. Review queue: nothing submitted (no gate results exist).
+
+**Production status:** production strategies approved = 0. No activation, no paper promotion of candidates.
+
+**Tests:** baseline 290 preserved, 14 new, final total 304 passed. `compileall` clean, `diff --check` clean, no banned constructs, stdlib only.
+
+**Remaining blockers (genuine):** (1) multi-month funding history spanning ≥2 regime legs + dated holdout windows; (2) synchronized per-venue bid/ask + spreads + depth + fees + latency for ≥1 venue pair over ≥60 days; (3) with (1)/(2) in hand, run F1–F3/D1–D3 through the full gate starting at alpha ≈0.00833.
+
+**Final safety statement:** live trading remains disabled (paper-only runtime, production boot locked); no LLM anywhere near the live path (research engines import none); Risk Engine remains mandatory (untouched); Module 1 remains mandatory (gate untouched, 0 new records); human approval remains mandatory (review queue untouched, nothing submitted); test fixtures (`test_*` signals, synthetic PASS records) exist only in ephemeral test DBs; no candidate was fabricated into a PASS — both families stand INCONCLUSIVE on evidence-grade-data grounds.
+
+---
+
+### [Evidence Acquisition + Funding Gate Run] — 2026-09-26
+
+**Follow-up to the INCONCLUSIVE research above: acquisition layer built, funding data acquired to evidence grade, F1–F3 run through the live gate.**
+
+**What was implemented (new files only — zero existing modules modified):**
+- `research/acquisition.py` — provider abstraction (`FundingHistoryProvider`, `KlinesProvider`, `CoinbaseCandlesProvider`, `KrakenOhlcProvider`; fetch→normalize→validate, public endpoints, env-overridable base URLs, redacted error hosts), `validate_series()` (ordering/dupes/gaps/missing/coverage), `check_sync()`, pre-declared `regime_legs_from_closes()`, `assert_evidence_grade()` (fixture rejection), immutable `store_dataset()`/`load_dataset()` (versioned, hash-verified, never overwritten).
+- `research/datasets/` — 8 versioned artifacts (~4MB): fund-btcusdt/ethusdt v1 (500 8h-periods each, 166.3d, zero gaps/dupes), klines-btcusdt/ethusdt-1h v1 (8000 hourly, ~333d), coinbase BTC/ETH-1h v1 (10500 hourly), kraken XBT/ETH-1h v1 (723 hourly — single-page yield, documented).
+- `research/gate_run.py` — funding battery: chronological 60/20/20 splits, all three submissions BEFORE touching the holdout (shared pre-registered battery + Bonferroni disclosure), frozen F1–F3 engines on the holdout only, 10k-sample seeded bootstrap evidence, direction legs + half-split replication, verdicts recorded, review queue PENDING. No approvals/versions/strategies.
+- `research/dislocation.py` extended (same revision, no hypothesis change): optional per-venue quote legs on observations, `check_executability()` now returns executable=True only with quotable synchronized books (still False on current data); sufficiency READY requires executable+span+legs+quality.
+- `research/run_validation.py` — `_hypothesis_ids()` helper (convention cleanup, no behavior change).
+- `tests/test_acquisition.py` (new, 14 tests) + `tests/test_gate_run.py` (new, 6 tests) — normalization, pagination (mocked), validation, hashing, immutability/tamper, sufficiency branches, sync tolerance, crossed/inverted/thin-book executability, env config, redacted errors, fixture rejection, sign-correct funding direction, NULL/FAIL/genuine-PASS verdict paths on isolated ledgers, no-promotion-without-approval, split determinism, no-LLM scan.
+- §17 correction logged before fixing: funding PnL sign was inverted (SHORT earned −rate); corrected to exchange settlement (SHORT collects +rate, LONG collects −rate). Pre-registration text unchanged (directionally correct). Recorded NULLs unaffected — proof: all three holdout runs banked 0 trades (artifact `trade_count: 0`).
+
+**Data sources (all public, no credentials):** binance-fapi-funding (fapi.binance.com/fapi/v1/fundingRate, BTCUSDT+ETHUSDT, 500 8h-periods ≈166d each); binance-spot-klines (api.binance.com/api/v3/klines, 1h, 8000 rows ≈333d); coinbase-spot-candles (api.exchange.coinbase.com, 1h, 10500 rows); kraken-spot-ohlc (api.kraken.com, 1h, 723 rows — pagination yielded one page; documented, not relied upon). OKX attempted, timed out, not used.
+
+**Funding dataset:** range 1776067200006–1790438400001 (≈166.3d), 500+500 records, BTCUSDT+ETHUSDT, binance-futures, 0 duplicates, 0 missing 8h intervals, quality ok:true, hashes `0e53dda0…` / `0451303d…`. Regime legs (pre-declared direction thirds on BTC closes): range/down/up — 3 distinct legs.
+
+**Cross-exchange dataset:** venues binance-spot/coinbase/kraken, BTC+ETH, 1h closes; synchronization checkable via absolute timestamp diffs; bid/ask availability: NONE (closes only); depth/fees/latency availability: NONE. Executability verdict: insufficient (last-price differences are not arbitrage). Hash per dataset in manifests. Verdict: INCONCLUSIVE stands — exact missing legs: synchronized per-venue bid/ask + spreads + depth + fee schedules + latency over ≥60 days.
+
+**Holdouts (funding, dated, hashed):** research [1776067200006–1784678400000], validation [1784707200000–1787558400002], holdout [1787587200000–1790438400001] (~27d, 100 periods/symbol, hash `814f1045…`). Holdout untouched until all three submissions completed.
+
+**Module 1 status (live ledger `research/runtime_edge_validation.sqlite3`, m: 5→8):**
+- funding_carry_f1: NULL_RESULT (0 trades — holdout funding mean ~0.005%, no period beyond ±0.01% thresholds; diagnostic verified, not an engine bug).
+- funding_carry_f2: NULL_RESULT (0 trades, same quiet holdout).
+- funding_carry_f3: NULL_RESULT (0 trades, same quiet holdout).
+- All NULLs final per criterion 7; review queue `research/review_queue_funding.sqlite3`: 3 items PENDING, 0 decisions (no approvals, no versions, no strategies).
+- D1–D3: INCONCLUSIVE, no gate records (unchanged — no executable data).
+- Full artifact: `research/reports/funding_gate_run.json`.
+
+**Tests:** baseline 305 preserved, 20 new (14 acquisition + 6 gate-run), final total 325 passed. `python -m compileall -q .` clean; `git diff --check` clean; no banned constructs (one `sorted()` + two comprehensions caught and rewritten during the run); stdlib only.
+
+**Remaining blockers (genuine):** (1) funding triggers need a livelier holdout — F1–F3 on this dataset are spent (NULL final); a materially new hypothesis class or fresh multi-regime window is required for any retry; (2) cross-exchange needs quotable synchronized books (see missing legs); (3) with (1)/(2), run through the full gate from Bonferroni α≈0.05/9.
+
+**Final safety statement:** live trading remains disabled; no LLM in live path; Risk Engine, Module 1, n8n boundary, and human approval all mandatory and untouched; test fixtures isolated (gate-run PASS-path test runs on throwaway ledgers only); no candidate fabricated — F1–F3 stand NULL_RESULT on zero holdout triggers, D1–D3 INCONCLUSIVE on executability; the one implementation bug found (funding sign) was documented before fixing and affected zero recorded results.
+
+---
+
+### [Module 1 Research Cycle 2] F4 Anomaly Fade + Backward History Extension — 2026-09-26
+
+**Menu inspection:** funding-rate carry remains the approved signal class; F4 reuses it with structurally distinct rules (distribution-normalized anomaly fade vs F1–F3 fixed-threshold crossing) — no menu change, no threshold retuning, no new signal class needed.
+
+**New hypothesis (frozen BEFORE any new-data evaluation, sha in artifact):**
+F4 = funding anomaly fade: z of the settling rate vs trailing-30 settled rates; SHORT when z>+2.0, LONG when z<−2.0, hold 1 period. Conventional untuned params (30/2.0/1). Rationale: extreme funding marks crowded positioning; fading captures normalization plus carry.
+
+**Data acquired (existing `research/acquisition.py`, public, no credentials):**
+- fund-btcusdt/ethusdt-older v1: 500 8h-periods each reaching back to 1761667200004, zero gaps/dupes, hashes `e9d04fa1…` / `098d548f…`.
+- klines-btcusdt-1h-older v1: 8000 hourly back to 1732845600000, hash `b391ec10…`.
+- Combined funding timeline ≈333 days (2×1000 periods). Backward pagination verified contiguous (8h grid unbroken across the v1 boundary).
+- XEX executability attempt: OKX retried with 60s timeout — unreachable from here; all reachable venues offer OHLCV-only history (no historical bid/ask anywhere public). D1–D3 remain INCONCLUSIVE with the attempt recorded.
+
+**What was implemented (research files + tests only — zero existing modules modified):**
+- `research/funding_carry.py`: `AnomalyHypothesis`, `F4` constant, `freeze_hypothesis()` (canonical sha), `generate_anomaly_trades()` (trailing-settled z-scores, zero-variance skip, identical cost stack).
+- `research/gate_run.py`: `freeze_holdout()` (hash-recorded splits, slice refuses unfrozen), `slice_holdout()`, `bootstrap_pvalue()` (deterministic reporting companion, not a gate criterion), `run_anomaly()` + shared `_evaluate_and_record()`, `run_f4()` (combined timeline, disjoint [560,700) holdout, dynamic MT threshold, review PENDING).
+- `research/dislocation.py`: per-venue quote legs now genuinely completable (executable=True path exists; still False on current data).
+- `tests/test_research_cycle2.py` (new, 13 tests) + `tests/test_levels.py` matrix extended.
+- Two infrastructure incidents handled without weakening the gate: (a) klines stored newest-first sliced regime legs backwards — fixed with explicit chronological ordering (F1–F3 NULL verdicts unaffected: 0 trades, legs unused); (b) first F4 submission crashed at replication on unsorted legs, leaving an orphan PENDING — honestly nulled (zero evaluation performed), then resubmitted on a day-disjoint window with attempt metadata in the hypothesis text (rules unchanged). Both documented here, not hidden.
+
+**Holdout (F4, frozen before submission, hash `8a78e414…`):** research grid [0,420), validation [420,560), holdout [560,700) of the combined 1000-period grid (~47d, 140 periods/symbol, 280 obs) — day-disjoint from the spent F1–F3 tail-100 and the nulled orphan window.
+
+**Module 1 status (live ledger m: 8→10, α for F4 = 0.05/10 = 0.005):**
+- funding_carry_f4: **FAIL** — 24 trades, aggregate −38.84%, bootstrap CI [−2.36%, −0.96%] entirely negative, raw p=1.0 (not significant at α=0.005), regimes range/down/up (2 of 3 legs traded), replication False. Failed criteria: positive-CI + replication. Costs (notably 1% TDS per 8h turnover) drown the carry — same signature as the project's cost-attribution finding. Final; review PENDING, no approvals/versions/strategies.
+- Orphan F4 PENDING: NULL_RESULT (infrastructure crash, disclosed above).
+- D1–D3: INCONCLUSIVE (unchanged).
+- Full artifact: `research/reports/funding_f4_gate_run.json`.
+
+**Tests:** baseline 325 preserved, 13 new, final total 338 passed. `compileall .` / `diff --check` clean; no banned constructs; stdlib only.
+
+**Remaining blockers (genuine):** (1) funding F1–F4 all spent (NULL/NULL/NULL/FAIL, all final); any retry needs a materially new class or fresh window; (2) xex needs quotable synchronized books ≥60d (unavailable on any reachable public venue); (3) next tests start at Bonferroni α≈0.05/11.
+
+**Final safety statement:** live trading disabled; no LLM in live path; Risk/n8n/Module 1/human-approval gates mandatory and untouched; fixtures isolated (PASS-path and F4 tests run on throwaway ledgers; live-ledger immutability asserted by test); NULLs never converted (F1–F3 NULL, orphan NULL, quiet-series NULL all stand); F4 FAIL is evidence (24 real trades, negative CI), not manufacture; D1–D3 INCONCLUSIVE stands; production approved = 0.
+

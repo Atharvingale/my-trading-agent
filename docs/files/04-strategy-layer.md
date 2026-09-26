@@ -1,49 +1,96 @@
 # Module 4: Strategy Proposal Layer
 
+## Status
+**Already implemented.** This revision clarifies its role; it is not the AI research engine.
+
 ## Purpose
-Generate BUY/SELL/HOLD proposals from `MarketContext`. **This module may only load a strategy that has a `PASS` verdict in the Edge Validation Gate's registry (module 1).** It must check this at load time, not just at design time.
+Generate BUY/SELL/HOLD proposals from `MarketContext` using **immutable, gate-approved production strategy versions**.
 
-## Current gate status (see module 1 for full detail)
-| Strategy | Status |
-|---|---|
-| Breakout | FALSIFIED — do not implement |
-| Scalping | FALSIFIED — do not implement |
-| Trend Following | Not yet gated — implement only after it passes module 1 |
-| Mean Reversion | Not yet gated — implement only after it passes module 1 |
-| VWAP Reversion | Not yet gated — implement only after it passes module 1 |
-| Order Flow | Not yet gated — implement only after it passes module 1 |
+This module is the bridge from the research/evolution plane into the deterministic production trading plane.
 
-## Files to implement
-```
-strategies/
-├── base.py           # abstract StrategyProposal interface + gate-check on load
-├── registry.py        # loads only strategies with a PASS verdict from edge_validation.registry
-└── <strategy_name>.py # one file per gate-approved strategy, added only once approved
-```
+## What Module 4 does NOT do
 
-## Proposal contract
+- It does not invent strategies.
+- It does not mutate strategy parameters.
+- It does not call an LLM.
+- It does not accept raw candidate hypotheses.
+- It does not bypass the Edge Validation Gate.
+
+Those responsibilities belong to Module 15.
+
+## Existing implementation contract
+
+Keep the existing `StrategyProposal` contract:
+
 ```python
 class StrategyProposal:
     proposal_id: str
     strategy_id: str
     strategy_version: str
-    edge_validation_record_id: str   # required — no default, no None
+    edge_validation_record_id: str
     symbol: str
     action: Literal["BUY", "SELL", "HOLD"]
-    confidence: float                # calibrated statistic, see module 5
-    evidence: list[dict]             # references into MarketContext fields
+    confidence: float
+    evidence: list[dict]
     horizon: str
     invalidation_conditions: list[str]
     timestamp: datetime
 ```
 
-## Hard rule
-`base.py`'s loader must raise, not warn, if a strategy module is imported without a corresponding `PASS` verdict for its `strategy_id` in the edge validation registry. This should be enforced in code, not just documented, so a future contributor can't accidentally wire in an ungated strategy.
+## Strategy status
+
+```text
+Production strategy versions:
+    none currently approved as of 2026-09-24
+
+Historical failed families:
+    Breakout
+    Scalping
+    Trend Following
+    Mean Reversion
+    VWAP Reversion
+    Order Flow
+    Daily Trend probe
+```
+
+Do not create placeholder production strategy files merely to make the Decision Engine produce BUY/SELL output.
+
+## New integration rule
+
+Module 15 may produce a `CandidateStrategyVersion`, but Module 4 may consume it only after:
+
+```text
+PASS edge_validation_record
++
+explicit human approval
++
+immutable production version created
+```
+
+At that point the version receives the same loader treatment as any other approved production strategy.
+
+## Recommended adapter boundary
+
+Keep existing Module 4 code intact and add only a narrow promotion adapter if needed:
+
+```text
+candidate_generation/review_queue.py
+        ↓
+strategy promotion adapter
+        ↓
+strategy_versions record
+        ↓
+strategies/<approved_strategy>.py or equivalent runtime registration
+        ↓
+existing strategies/registry.py
+```
+
+The existing gate check in `strategies/registry.py` remains authoritative.
 
 ## Acceptance criteria
-- Attempting to load Breakout or Scalping raises an explicit `StrategyNotGatedError`.
-- Each implemented strategy's proposal includes a valid `edge_validation_record_id` that resolves to a `PASS` verdict.
-- Unit tests cover: proposal generation on synthetic context, rejection of ungated strategies, and confidence calibration against historical hit rate (not a hardcoded or arbitrary number).
 
-## When done
-Log to `docs/implementation-log.md` which strategies were implemented, their gate record IDs, and the confidence calibration method used.
+- Existing Module 4 tests remain green.
+- An unapproved candidate cannot be loaded.
+- A PASS without human approval cannot be loaded.
+- An approved immutable production version can be loaded using the existing gate-aware registry.
+- No LLM call is present in the proposal path.
