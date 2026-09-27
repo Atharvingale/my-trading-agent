@@ -4,7 +4,7 @@ Update this table whenever work starts or finishes on a module. Keep it in sync 
 
 | # | Module | File | Status | Last updated |
 |---|---|---|---|---|
-| 1 | Edge Validation Gate | 01-edge-validation-gate.md | Done — 7/7 prior FAIL + F1–F3 NULL + F4 FAIL (24 trades, CI entirely negative, final) + orphan NULL (infra crash, disclosed) + D1–D3 INCONCLUSIVE; ledger m=10; 0 PASS; funding history now ~333d; 0 approved | 2026-09-26 |
+| 1 | Edge Validation Gate | 01-edge-validation-gate.md | Done — 7/7 prior FAIL + F1–F3 NULL + F4 FAIL (24 trades, CI entirely negative, final) + orphan NULL (infra crash, disclosed) + D1–D3 CLOSED_UNAVAILABLE 2026-09-27 (research-level closure, ledger untouched, not a falsification) + RS-001 cross-sectional FAIL (121 trades, aggregate -99.90% compounded — correction 2026-09-27 of reported -193.76% sum — CI [-2.07%, -1.16%] entirely negative, final; scope_caveat: FAIL covers the 2-asset BTC/ETH variant only, broader universe is a new pre-registration); ledger m=11; 0 PASS; 0 approved | 2026-09-27 |
 | 2 | Market Data Hardening | 02-market-data-hardening.md | Done — P0/P1/P2 fully closed; 24 hardening tests passing (wired async writer, tracked fan-out, token+TLS gate, 24h simulated soak, restart/recovery, periodic retention, authoritative universe, analytics split, feature cache, repo reads, shared client, centralized backoff); 116 total tests passing | 2026-09-24 |
 | 3 | Observer + Context Builder | 03-hermes-core-observer-context.md | Done — MarketContext + builder + observer live; 8 acceptance tests passing; 124 total tests passing | 2026-09-24 |
 | 4 | Strategy Proposal Layer | 04-strategy-layer.md | Blocked (no approved production version — PASS-only loader preserved, production loader requires PASS + human approval + immutable version; promotion adapter ready, zero versions approved) | 2026-09-26 |
@@ -17,7 +17,7 @@ Update this table whenever work starts or finishes on a module. Keep it in sync 
 | 11 | Supervisor / 24-7 Runtime | 11-supervisor-runtime.md | Done — asyncio supervision, health probes + failure table, rebuild-gated decisions, 10 tests passing; full suite 248 passing | 2026-09-26 |
 | 12 | Testing Strategy | 12-testing-strategy.md | Done (harness, not a service) — level registry + soak/failure/backtest/venue suites, 14 tests passing; full suite 262 passing | 2026-09-26 |
 | 13 | Security Requirements | 13-security-requirements.md | Done (bar, not a service) — credentials loader + redaction + settings audit, 12 tests passing; full suite 274 passing | 2026-09-26 |
-| 15 | Candidate Generation Loop | 15-candidate-generation-loop.md | Done — all 5 files (generator/menu/multiple_testing/review_queue/provider_client), 11 tests passing; full suite 172 passing; initial menu funding-rate carry + cross-exchange dislocation | 2026-09-26 |
+| 15 | Candidate Generation Loop | 15-candidate-generation-loop.md | Done — all 5 files (generator/menu/multiple_testing/review_queue/provider_client), 11 tests passing; full suite 172 passing; menu now funding-rate carry (exhausted) + cross-exchange dislocation (closed unavailable) + cross-sectional-relative-strength (tested FAIL 2026-09-27) + open-interest-positioning-dynamics (new 2026-09-27, pre-registration pending; persisted in research/hypothesis_menu.sqlite3) | 2026-09-27 |
 
 | — | Runtime Integration (paper pipeline) | runtime/ | Done — market→context→strategy→decision→risk→n8n→paper→lifecycle→learning→research wired, supervisor workers real, 16 integration tests passing; full suite 290 passing | 2026-09-26 |
 

@@ -1,0 +1,117 @@
+{
+  "coverage": {
+    "bad_bars": 0,
+    "duplicates": 0,
+    "gaps_over_1h": 0,
+    "missing_symbols": [],
+    "ok": true,
+    "per_symbol": {
+      "BTCUSDT": {
+        "gaps_over_1h": 0,
+        "n": 3624
+      },
+      "ETHUSDT": {
+        "gaps_over_1h": 0,
+        "n": 3624
+      }
+    },
+    "reasons": [],
+    "span_days": 150.95833333333334,
+    "survivorship": {
+      "continuously_listed": [
+        "BTCUSDT",
+        "ETHUSDT"
+      ],
+      "delisted_excluded_silently": false,
+      "note": "2-asset limitation disclosed in pre-registration; no synthetic history used"
+    },
+    "symbols": [
+      "BTCUSDT",
+      "ETHUSDT"
+    ],
+    "universe": [
+      "BTCUSDT",
+      "ETHUSDT"
+    ]
+  },
+  "experiment": {
+    "aggregate_net": -1.9375824433838307,
+    "aggregate_net_corrected": -0.9989588151139789,
+    "aggregate_return_corrected": true,
+    "method": "compounded, not summed",
+    "original_reported_value": -1.9375824433838307,
+    "aggregate_correction_note": "Headline aggregate was the simple sum of the three regime-leg sums (-29.65% + -99.58% + -64.53% = -193.76%), which is not a valid cumulative return for an unlevered long-only book (true cumulative cannot go below -100%). Corrected 2026-09-27 by proper chaining over the already-computed per-regime decimals: (1+r1)*(1+r2)*(1+r3)-1 = -99.90%. Original value preserved in aggregate_net above; trade-level data, bootstrap CI, regime legs, stress figure, and FAIL verdict unchanged. stress_net_return (-239.11%) shares the same summation form and is likewise not a compoundable cumulative figure; its failed stress_costs check is unaffected either way.",
+    "scope_caveat": "This FAIL applies to the 2-asset (BTC, ETH) variant of cross-sectional-relative-strength only. With only 2 symbols, ranking collapses to a binary switch and is a weak instance of the general cross-sectional class. A future attempt with a broader universe (10+ symbols) is a new, distinct pre-registration requiring its own fresh disjoint holdout — not a forbidden retry of this same hypothesis_id or family.",
+    "alpha": 0.004545454545454546,
+    "bootstrap_ci": [
+      -0.020698111653855582,
+      -0.011554506993187537
+    ],
+    "evidence_fingerprint": "c255a1c7d718c2090a92f6e166088f53425820052b447cb38d884cbc0b30132b",
+    "failed_criteria": [
+      "positive_bootstrap_confidence_interval",
+      "independent_replication_when_refined"
+    ],
+    "ledger_m": 10,
+    "raw_p_value": 1.0,
+    "record_id": "04889556-5f3f-43a0-9276-4ab877a95af6",
+    "regime_returns": {
+      "first-leg-range": -0.29647997008907084,
+      "second-leg-down": -0.9958278576233169,
+      "third-leg-up": -0.6452746156714441
+    },
+    "replication_passed": false,
+    "research_failed": [
+      "aggregate_positive",
+      "bootstrap_excludes_zero",
+      "stress_costs"
+    ],
+    "strategy_id": "cross_sectional_rs_001",
+    "stress_net_return": -2.391174291991528,
+    "trade_count": 121,
+    "universe_mean_note": "benchmark is the contemporaneous equal-weight universe mean; reported in the artifact discussion, not gated",
+    "verdict": "FAIL"
+  },
+  "holdout": [
+    "2025-12-03",
+    "2026-05-02"
+  ],
+  "holdout_hash": "59720093bb8b190554690b79361e4e8522b9b70e2d25fa2e7e7f9ab5115294f3",
+  "holdout_ms": [
+    1764720000000,
+    1777766399000
+  ],
+  "hypothesis_id": "cross_sectional_rs_001",
+  "ledger_m_before": 10,
+  "ledger_m_including_current": 11,
+  "multiple_testing": {
+    "base_alpha": 0.05,
+    "family": "cross-sectional",
+    "method": "bonferroni",
+    "required_alpha": 0.004545454545454546,
+    "total_tested_including_current": 11
+  },
+  "rebalance_count": 144,
+  "record_id": "04889556-5f3f-43a0-9276-4ab877a95af6",
+  "regime_legs": [
+    {
+      "end_ms": 1769076000000,
+      "name": "first-leg-range",
+      "return": -0.017751449594436395,
+      "start_ms": 1764720000000
+    },
+    {
+      "end_ms": 1773432000000,
+      "name": "second-leg-down",
+      "return": -0.20969225046034717,
+      "start_ms": 1769076000000
+    },
+    {
+      "end_ms": 1777795200000,
+      "name": "third-leg-up",
+      "return": 0.09834226715577037,
+      "start_ms": 1773432000000
+    }
+  ],
+  "required_alpha": 0.004545454545454546
+}

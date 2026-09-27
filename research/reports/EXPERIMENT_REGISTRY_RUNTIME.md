@@ -875,3 +875,115 @@ Outcome: PENDING — no results recorded yet.
 
 ---
 
+## Preregistered hypothesis — 2026-09-27T02:58:42.788801+00:00
+
+- Record ID: `04889556-5f3f-43a0-9276-4ab877a95af6`
+- Strategy: `cross_sectional_rs_001` (family `cross_sectional_rs_001`)
+- Hypothesis: Cross-sectional relative strength (cross_sectional_rs_001): daily 00:00 UTC long-only rotation holding the top volatility-adjusted 168h trailing-return asset of BTCUSDT/ETHUSDT spot (top 1 of 2), no short leg, spot execution, frozen holdout 2025-12-03 through 2026-05-02. Pre-registered in research/hypotheses/cross_sectional_rs_001.md before any holdout return was computed.
+- Holdout: 2025-12-03 through 2026-05-02
+- Requires independent replication: False
+- Materially new rationale: None
+- Source: `HUMAN`
+- Candidate ID: `None`
+- Parent candidate ID: `None`
+- Hypothesis ID: `None`
+- Signal class: `cross-sectional-relative-strength`
+- Provider: `research-operator`
+- Multiple-testing family: `cross-sectional`
+- Multiple-testing threshold: `0.004545454545454546`
+- Pre-registered thresholds:
+
+```json
+{
+  "bootstrap_must_exclude_zero": true,
+  "hypothesis_file": "research/hypotheses/cross_sectional_rs_001.md",
+  "long_only_top_quantile": "top-1-of-2",
+  "lookback_bars": 168,
+  "minimum_trades": 20,
+  "multiple_testing_required_alpha": 0.004545454545454546,
+  "ranking": "volatility-adjusted-trailing-return",
+  "rebalance": "daily-00:00-UTC"
+}
+```
+- Cost and tax assumptions:
+
+```json
+{
+  "fee_rate": 0.001,
+  "loss_offset_allowed": false,
+  "slippage_rate": 0.001,
+  "tax_rate": 0.312,
+  "tds_is_cash_flow_drag": true,
+  "tds_rate": 0.01
+}
+```
+
+Outcome: PENDING — no results recorded yet.
+
+---
+
+## Result — 2026-09-27T02:58:49.834041+00:00
+
+- Preregistration record ID: `04889556-5f3f-43a0-9276-4ab877a95af6`
+- Verdict: **FAIL**
+- Evidence:
+
+```json
+{
+  "acceptance_checks": {
+    "fresh_holdout_for_strategy_family": true,
+    "independent_replication_when_refined": false,
+    "net_of_fees_slippage_and_vda_tax": true,
+    "null_result_recorded_without_retries": true,
+    "positive_bootstrap_confidence_interval": false,
+    "preregistered_before_holdout": true,
+    "two_structurally_different_regimes": true
+  },
+  "bootstrap_ci": [
+    -0.020698111653855582,
+    -0.011554506993187537
+  ],
+  "evidence": {
+    "dataset_id": "spot-1h-BTCUSDT-ETHUSDT-2025-12-03-2026-05-02",
+    "dataset_sha256": "59720093bb8b190554690b79361e4e8522b9b70e2d25fa2e7e7f9ab5115294f3",
+    "fingerprint": "c255a1c7d718c2090a92f6e166088f53425820052b447cb38d884cbc0b30132b",
+    "net_return": -0.01601307804449447
+  },
+  "regime_results": {
+    "first-leg-range": -0.29647997008907084,
+    "second-leg-down": -0.9958278576233169,
+    "third-leg-up": -0.6452746156714441
+  },
+  "replication_result": "FAIL"
+}
+```
+
+---
+
+## Correction annotation — 2026-09-27 (Cycle 4 pre-work, audit only)
+
+- Applies to result record ID: `04889556-5f3f-43a0-9276-4ab877a95af6` (`cross_sectional_rs_001`, FAIL).
+- The SQLite `edge_validation_records` RESULT row is append-only (no-update
+  trigger) and this task forbids new RESULT rows, so this file-backed registry
+  entry plus `research/reports/cross_sectional_rs_gate_run.json` carry the
+  superseding annotation; the SQLite row itself is untouched and no history
+  was rewritten.
+- `aggregate_return_corrected: true, method: "compounded, not summed",
+  original_reported_value: -193.76%`. The gate-run artifact reported
+  `aggregate_net: -1.9375824433838307`, the simple sum of the three
+  regime-leg sums (-29.65% + -99.58% + -64.53%), which is not a valid
+  cumulative return for an unlevered long-only book. Corrected figure,
+  chained over the already-computed per-regime decimals
+  ((1+r1)*(1+r2)*(1+r3)-1): **-0.9989588151139789 (-99.90%)**. Trade-level
+  data, bootstrap CI, regime legs, stress figure, and the FAIL verdict are
+  unchanged.
+- `scope_caveat: "This FAIL applies to the 2-asset (BTC, ETH) variant of
+  cross-sectional-relative-strength only. With only 2 symbols, ranking
+  collapses to a binary switch and is a weak instance of the general
+  cross-sectional class. A future attempt with a broader universe (10+
+  symbols) is a new, distinct pre-registration requiring its own fresh
+  disjoint holdout — not a forbidden retry of this same hypothesis_id or
+  family."`
+
+---
+

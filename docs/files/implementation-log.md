@@ -690,3 +690,96 @@ F4 = funding anomaly fade: z of the settling rate vs trailing-30 settled rates; 
 
 **Final safety statement:** live trading disabled; no LLM in live path; Risk/n8n/Module 1/human-approval gates mandatory and untouched; fixtures isolated (PASS-path and F4 tests run on throwaway ledgers; live-ledger immutability asserted by test); NULLs never converted (F1–F3 NULL, orphan NULL, quiet-series NULL all stand); F4 FAIL is evidence (24 real trades, negative CI), not manufacture; D1–D3 INCONCLUSIVE stands; production approved = 0.
 
+---
+
+### [Module 1 + Module 15] D1–D3 closure, cross-sectional-relative-strength menu addition, RS-001 gate run — 2026-09-27
+
+**Step 0 inspection (before acting):**
+- Ledger `research/runtime_edge_validation.sqlite3`: HYPOTHESIS count m=10 (trend/order/mean/vwap/daily FAIL x5, F1/F2/F3 NULL x3, F4 orphan NULL + F4 FAIL); 0 PASS; 0 approved production strategies. DISCREPANCY vs task expectation: 0 D1–D3 rows exist in `edge_validation_records` — D1–D3 INCONCLUSIVE lives at research level only (`research/candidates_funding_xex.sqlite3` candidates 0bcfe752/08ebafb9/17689072 + `research/dislocation.py::evaluate_sufficiency`, 0 gate records written per `funding_xex_validation.json`). No ledger row was edited, deleted, or invented to "fix" this; the closure below is recorded at research level with m unchanged.
+- Menu `candidate_generation/hypothesis_menu.py`: approved list is exactly `funding-rate carry` + `cross-exchange dislocation` (INITIAL_APPROVED, no persisted additions yet). Both exhausted: funding F1–F4 all final (NULL/NULL/NULL/FAIL), cross-exchange blocked on executability (see closure).
+- Prior holdout/tuning ranges (crypto; no NSE ranges exist): 2023-01-01–2024-01-01 (daily), 2024-01-01–2024-04-01 (trend), 2024-04-02–2024-07-01 (order), 2024-07-02–2024-10-01 (mean), 2024-10-02–2025-01-01 (vwap), 2026-08-24–2026-09-26 (F1–F3), 2026-06-25–2026-08-24 (F4 orphan, nulled pre-evaluation, listed as touched), 2026-05-03–2026-06-18 (F4). Funding research/validation splits were definition-only; no parameter was tuned on any window.
+- Stored multi-symbol data: `research/datasets/klines-btcusdt-1h v1` + `klines-ethusdt-1h v1` (8000 hourly each, 2025-10-28–2026-09-26, 1h interval, zero gaps/dupes in the frozen window); `data/market_data.sqlite3` kline coverage is 1m/~4d only (unsuitable for a fresh holdout). Execution is spot-only (`paper_trading/portfolio.py` long-only, paper-default runtime, no futures-short path), so the hypothesis is long-only vs universe mean, not long/short.
+
+**What was closed (D1–D3):**
+- Record: `research/reports/d1_d3_closure.json` (candidate_ids 0bcfe752/08ebafb9/17689072 = D1/D2/D3 first registrations; signal_class cross-exchange-dislocation; status CLOSED_UNAVAILABLE; superseded_status INCONCLUSIVE; verbatim reason/interpretation from the task document; closed_at 2026-09-27T02:52:48+00:00; closed_by human-approved, 2026-09-27). No `edge_validation_records` row was written for this (the table's CHECK constraints admit no CLOSED_UNAVAILABLE verdict, and closing an already-counted record must not increment m); ledger m unchanged by this step. `docs/files/module-status.md` Module 1 row updated to reflect the closure. No OHLCV was reused as a proxy for the missing bid/ask/depth/fees/latency — the closure stands as unavailable, full stop.
+
+**What was added to the menu:**
+- `HypothesisMenu.add_with_approval('cross-sectional-relative-strength', 'human, 2026-09-27', <verbatim rationale>)`, persisted in new `research/hypothesis_menu.sqlite3` (`menu_additions`, append-only). Approved list is now funding-rate carry + cross-exchange dislocation + cross-sectional-relative-strength. Exclusion check enforced in design (pre-registration): no absolute-momentum filter; top rank held even when negative; removing the ranking step leaves no signal. No LLM chose any parameter.
+
+**Pre-registration file (frozen before any holdout return was touched):**
+- `research/hypotheses/cross_sectional_rs_001.md` (hypothesis_id cross_sectional_rs_001, frozen 2026-09-27T02:55:00+00:00, immutable — redesign requires a new id). Universe [BTCUSDT, ETHUSDT]; eligibility 30d avg notional >= $10M/day + listing age >= 90d; lookback 168 hourly bars; ranking volatility-adjusted trailing return (R/S, S==0 → 0); long-only top-1-of-2 vs universe mean, no short leg (spot-only verified); daily 00:00 UTC rebalance; hold to next rebalance; verbatim cost stack per closed holding (0.001/0.001/0.312/0.01, no loss offset, TDS drag) with doubled fee/slippage stress. Holdout selection rule (pre-stated, performance-blind): most recent contiguous >=150d window with full 2-asset 1h coverage disjoint from all eight ranges above → 2025-12-03 through 2026-05-02 (150d). No return series from that window was computed or viewed before the freeze.
+
+**Computed alpha and m (Step 6, live from the ledger at run time via `candidate_generation/multiple_testing.py`):**
+- m before = 10, test #11 → required_alpha = 0.05/11 ≈ 0.004545 (method bonferroni, family cross-sectional, stored as provenance on the hypothesis). Raw bootstrap p-value companion 1.0 (not significant at the bar; reporting only, never a gate criterion).
+
+**Final verdict (Step 7, identical Module 1 machinery, no new gate logic):**
+- FAIL (final, not retryable on this window): 121 daily closed holdings (144 daily boundaries minus 23-day eligibility warmup inside the window; >= 20 minimum met), aggregate net -193.76% (sum of per-day net fractions; mean ≈ -1.60%/day), bootstrap CI [-2.0698%, -1.1555%] (seed 20260927, 10000 samples) entirely negative, stress (doubled fee/slippage) -239.12%, regimes first-leg-range -29.65% / second-leg-down -99.58% / third-leg-up -64.53% (3 legs, >1 regime confirmed), replication FAIL (outer legs both negative). Failed gate checks: positive_bootstrap_confidence_interval + independent_replication_when_refined. Ledger: `cross_sectional_rs_001` HYPOTHESIS `04889556-5f3f-43a0-9276-4ab877a95af6` → RESULT FAIL (evidence fingerprint `c255a1c7…`); review `research/review_queue_cross_sectional.sqlite3` PENDING, 0 decisions. Artifacts: `research/cross_sectional_rs.py` (frozen engine) + `research/cross_sectional_gate_run.py` (battery) + `research/reports/cross_sectional_rs_gate_run.json`. Costs (notably 1% TDS per daily turnover on a flat relative edge) drown the sleeve — same signature as the project's cost-attribution finding. `strategies/`, `execution/`, `risk/`, Module 4–8 wiring untouched; no promotion on any verdict.
+
+**Tests run:**
+- Full suite + `git diff --check` + `compileall` in Step 9 (counts reported there). No new external dependency (stdlib only); no OHLCV-as-quote proxy; no synthetic/interpolated bars (coverage validation: 3624+3624 hourly bars, 0 gaps, 0 dupes, 0 bad bars, notional BTC ~$1.13B/day / ETH ~$613M/day).
+
+**Open questions / follow-ups:**
+- Do NOT retry cross_sectional_rs_001 on 2025-12-03–2026-05-02; a new holdout requires a new hypothesis_id and fresh disjointness check. Cross-sectional RS as implemented (2-asset daily top-1) is spent on this window. Module 4 remains correctly Blocked (0 PASS).
+
+---
+
+### [Cycle 4 pre-work] Documentation cleanup + OI/liquidation audit — 2026-09-27 (audit only)
+
+**What was done (no hypothesis, no holdout, no ledger test, no alpha call, no menu change):**
+- A1: corrected the RS-001 headline aggregate by proper chaining over the already-computed regime decimals (-29.65% / -99.58% / -64.53% → (1+r1)(1+r2)(1+r3)-1 = **-99.90%**, was reported as summed -193.76%). Correction appended to `research/reports/cross_sectional_rs_gate_run.json` (original preserved) and as an annotation in `research/reports/EXPERIMENT_REGISTRY_RUNTIME.md`. The SQLite RESULT row was deliberately NOT rewritten (no-update trigger; this task forbids new RESULT rows) — documented in the annotation. Trade data, bootstrap CI, and FAIL verdict unchanged.
+- A2 (findings only, no records modified): F4's -38.84% shares the same summation form (sum of per-trade fractions = sum of leg sums; compounded over its 2 legs ≈ -35.77% — still clearly negative, FAIL stands). Phase-0 runner experiments (trend/order/mean/VWAP/daily) report the MEAN of 4 window returns, not a sum — no bug of this type. Breakout/scalping seeded figures (-27.78%/-39.42%) are spec-seeded headlines with no holdout/trades — nothing to recompute.
+- A3: `scope_caveat` (2-asset variant only; broader universe = new pre-registration) added to the RS-001 artifact, the registry annotation, and the Module 1 status line (aggregate figure there updated to -99.90% compounded).
+- Part B: new `docs/files/D1-D3-NOTE.md` states D1–D3 never existed as gate rows and the CLOSED_UNAVAILABLE closure is the only record.
+- Part C: new `docs/files/oi-liquidation-coverage-audit.md` — OI history exists for BTC/ETH only (126 × 5m bars, 10.4 h, 0 gaps); liquidations are a raw per-event feed (116 symbols, all inside one 1.77 h window; BTC 5 / ETH 2 events); common OI+liq+funding+price overlap ≈ 1.65 h on 2026-09-22; 0 symbols with ≥90d (or ≥180d) full coverage.
+
+**Tests run:** full suite re-run in the verification step below (no `.py` files changed in this task — docs/JSON/MD only).
+
+**Open questions / follow-ups:** whether the F4 record also gets a correction note needs separate human approval (not done here). Hypothesis design for OI/liquidation dynamics awaits human review of the audit.
+
+---
+
+### [Cycle 4 pre-work, cont.] Public-archive OI/liquidation audit — 2026-09-27 (audit only)
+
+**What was done (no hypothesis, no menu change, no holdout, no ledger write, no alpha call, no `.py` changes):**
+- Verified against Binance's own sources: `binance-public-data` repo README + file tree (no `metrics/`/`liquidationSnapshot/`/`fundingRate/` docs there) and live `data.binance.vision` probes (~72,000 HEAD/GET). Confirmed: `metrics/` daily-only EXISTS, `fundingRate/` monthly-only EXISTS, klines EXISTS, **`liquidationSnapshot/` UNAVAILABLE** (8 path/stem variants × dates/symbols/UM+CM, all HTTP 404).
+- Census over live USDT-PERPETUAL universe (527 symbols): metrics 522/527 (5 recent CJK listings absent), liquidationSnapshot 0, fundingRate-monthly 520/527.
+- Per-symbol metrics coverage: first/last via exact bisection (last file 2026-09-25 = T+1 cadence; bulk first 2021-12-01, BTC 2020-09-01); missing days via exhaustive daily sweep (29-symbol panel: 2 missing days total — NEAR 2023-12-18, SUI 2023-12-13, both re-verified) + month-grid with full drill-down of every flag (CTK/CVX/LIT/MAVIA gaps enumerated exactly, all proven genuine via same-archive klines xref — contracts traded throughout, so PARTIAL not lifecycle).
+- Checksum-verified 6 sample files (5 metrics tiers + 1 fundingRate month): all sha256 True, all parse clean. Verified schema correction: **OI metrics are 5-minute state rows in UTC-daily partitions (288/day), not daily aggregates**; intraday phase varies by symbol/day; one sample file holds 287/288 rows (single missing 5 m bar).
+- Cross-ref: 4-way common window is empty for every symbol (no liquidation leg); 3-way (metrics+internal funding+price) max 2025-10-28..2026-09-25, 333 d, BTC+ETH only. Headlines: **0 symbols ≥90 d, 0 ≥180 d full 4-way** (same as internal baseline); archive improves OI breadth (507 FULL spans ≥90 d) but the binding constraint is now missing liquidation evidence.
+- New artifact: `docs/files/oi-liquidation-public-archive-coverage-audit.md` (source verification, 522-row coverage table, missingness classes, checksum table, windows, verbatim summary + granularity correction, interpretation boundary). Sample zips kept in auditor temp space, outside the repo.
+
+**Tests run:** full suite re-run below (docs-only change).
+
+**Open questions / follow-ups:** none in scope — OI/liquidation hypothesis design awaits human review of both audits.
+
+---
+
+### [Cycle 4] Class redefinition + archive-to-archive common window — 2026-09-27 (menu update + audit; no hypothesis)
+
+**Part A — menu/ledger update (human-approved redefinition):**
+- A1: `research/reports/liquidation_intensity_closure.json` (component liquidation-intensity, status CLOSED_UNAVAILABLE, verbatim reason/interpretation, closed_by human-approved 2026-09-27). Research-level closure like D1–D3; no gate row, m unchanged.
+- A2: `HypothesisMenu.add_with_approval('open-interest-positioning-dynamics', 'human, 2026-09-27', <verbatim rationale>)` persisted in `research/hypothesis_menu.sqlite3` (now 4 approved classes; Module 15 status line lists all four — the task text said "3 classes" but the ledger-authoritative menu retains cross-sectional-relative-strength, so it is listed rather than hidden). Exclusion check ("must NOT reduce to 'OI went up, price will go up'... positioning extremity/crowding relative to own history") recorded here and in the report-back; it constrains the future pre-registration, which is a separate task.
+- Note: three `docs/files/*.md` artifacts from the two prior audit turns were found missing from disk mid-task (prior research/ + Temp + log state intact); the public-archive audit (incl. new §H), the internal-collector audit, and `D1-D3-NOTE.md` were reconstructed verbatim from retained probe data and re-verified on disk. No numbers changed in reconstruction.
+
+**Part B — archive-to-archive common window (audit only):**
+- fundingRate monthly fully enumerated 2020-01..2026-09 for all 522 metrics symbols (monthly files ARE the dataset: exact at month resolution; Sep 2026 pending, never a gap). Interior genuine funding gaps: exactly two — BNTUSDT 2021-05..2023-07, cross-archive-evidenced as a delist period (metrics first 2023-08-10, klines monthly absent in gap, TRADING now) → LIFECYCLE-LIMITED; LITUSDT 2025-07..2025-11, genuine (klines present throughout) → PARTIAL.
+- klines 1h monthly fully enumerated 2019-09..2026-09: zero interior missing months across all 522 symbols; exact daily-file bisection for klines first/last per symbol (2 early transport failures bisected clean on retry: ALPINEUSDT/STABLEUSDT).
+- Common window (metrics ∩ archive-funding ∩ archive-klines, funding-capped at 2026-08-31): **510 symbols ≥90 d, 495 ≥180 d, 397 ≥365 d** (longest gap-free run per symbol; 6 metrics-PARTIALs counted by longest run, BNT by its valid post-relist run). Largest: **BTCUSDT 2020-09-01..2026-08-31 (2191 d, FULL)**; next tier 1735 d (2021-12-01 cohort). No common window: MARSCOINUSDT, PONSUSDT (no fundingRate months — UNAVAILABLE leg).
+- Reconciliation: §E's "333 d, BTC/ETH only" was an internal-DB cross-reference limit (internal funding/price cover BTC/ETH only), not an archive limit — archive-native is 510 ≥90 d / 2191 d max. Four-way (with liquidationSnapshot) stays 0/0 in both views.
+- 5 new checksum samples (SOL/BNB/ARB klines daily incl. an older 2024-03-10 date, SOL/SUI fundingRate monthly): all sha256 True, all parse clean (klines: header + 24 unique hourly rows 00:00–23:00 UTC; funding: complete 90/93-row months).
+- Appended `## H` to the public-archive audit (original §E untouched); §H carries the full per-symbol common-window table, threshold lists, reconciliation, samples, and granularity confirmation (OI 5 m rows/daily partitions; funding 8 h rows/monthly; klines 1 h rows/daily).
+
+**Tests run:** full suite re-run below (no `.py` changes in this task).
+
+**Open questions / follow-ups:** OI-positioning hypothesis design (lookback, ranking/threshold, rebalance, holding, costs) is a separate pre-registration step — not started.
+
+---
+
+### [Incident] File-loss investigation + durability fix — 2026-09-27 (blocks Cycle 4, now closed)
+
+**Root cause (Part A): user-driven move, not environment loss.** The three "missing" reports were moved by the operator from `docs/files/` to `docs/results/` mid-task (confirmed directly). Supporting checks: `git log -- <each path>` returns nothing (all three were untracked — committed history never contained them); `.gitignore` excludes only `data/`, venv, env/IDE files (nothing under `docs/`); so the fragility was real (untracked files + no commit) but the trigger event was the human move, not filesystem ephemerality. Correction to the prior entry's line 762: nothing was "reconstructed from loss" — the originals survived in `docs/results/`; my mid-task `docs/files/` rewrites were redundant copies, now removed (single canonical home: `docs/results/`, per operator decision).
+
+**Grounding verification (Part B):** originals verified byte-identical where comparable (D1 note SHA-256 match both copies); results/ public-archive version already contains the turn-4 table fixes. §H figures re-derived live from raw retained probe stores (`sweep.json` 70k day-cells, `a2a_ckpt.json` 86k month-cells, `bounds.json`, `klines_bounds.json` — all with mtimes predating the move discovery): (1) BTCUSDT min-present sweep date 2020-09-01, 2216 cells, 0 missing; (2) BNT raw month cells fund+klm False for all 27 months 2021-05..2023-07 with True shoulders (plus a noted early-2021 funding-present/klines-absent backfill divergence, now disclosed in §H); (3) threshold recomputation from raw stores gives 507/492/395 over the 517-symbol subset, exactly matching reported 510/495/397 once the 3 klines-bounds-retry symbols (CARV/KAVA/TRADOOR) are included. No narrative regeneration; no live re-audit required.
+
+**Durability fix (Part C):** committed the documentation/report/ledger layer to git (see commit below; `data/*.sqlite3` and untracked research `.py` stay out per scope); added `scripts/verify_artifacts.py` — run at the start of every future task to confirm prior-task files exist non-trivially before trusting them. `strategies/`, `execution/`, `risk/`, `hypothesis_menu.py`, ledger rows untouched; no hypothesis designed.
+
