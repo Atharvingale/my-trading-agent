@@ -783,3 +783,23 @@ F4 = funding anomaly fade: z of the settling rate vs trailing-30 settled rates; 
 
 **Durability fix (Part C):** committed the documentation/report/ledger layer to git (see commit below; `data/*.sqlite3` and untracked research `.py` stay out per scope); added `scripts/verify_artifacts.py` — run at the start of every future task to confirm prior-task files exist non-trivially before trusting them. `strategies/`, `execution/`, `risk/`, `hypothesis_menu.py`, ledger rows untouched; no hypothesis designed.
 
+---
+
+### [Cycle 4] oi_positioning_001 pre-registration — 2026-09-28 (Amendment 1 restart)
+
+**What was implemented:**
+- `research/hypotheses/oi_positioning_001.md` (new, FROZEN): bottom-decile `sum_toptrader_long_short_ratio` (positions, size-weighted) contrarian long-only, 5-day spot hold, research 2021-01-01..2025-05-31 / embargo 2025-06-01..2025-08-31 / holdout 2025-09-01..2026-08-31, costs verbatim (fixed 0.0140), date-cluster bootstrap (10k, seed 20260928, trade_returns=date means), live alpha 0.0041666667 (m=12), top-60 universe with full list, overlap disclosure, throughput decision (top-60 retained), Step 6 stopping rule, deviations section (prior-session 2025-09-01 contamination discarded).
+- `research/oi_positioning_universe.py` (new): embargo guard (`EMBARGO_END_MS=1756684799999 < HOLDOUT_START_MS=1756684800000`, `assert_embargo_only`/`assert_embargo_end_bound`), corrected leveraged rule, stable/fiat + index filters, explicit rank-descending. No list comprehensions, no sorted(), stdlib only.
+- `tests/test_oi_positioning_universe.py` (new, 6 tests): guard reject/accept, end-bound, JUP/SYRUP kept + BTCUP caught, stable exclusion.
+- Pre-reg commit: `448bfb08482472d93034ec3869636f6379103121` (precedes any holdout-period read since restart; clean ranking embargo-only with guard; listing checks earliest-only; trial research-only).
+- Universe (clean): 495 FULL ∩ spot TRADING USDT (496) = 346; minus stable USDCUSDT/FRAXUSDT = 344; complete 92/92 embargo = 281 (63 incomplete excluded incl. RESOLVUSDT 82/92); ≥$10M = 67; top 60 frozen (all n=92, all listed <2025-06-01, 60th MEMEUSDT 11.34M; 61st-67th ICP/INIT/LPT/MAGIC/WCT/JUP/PYTH cut by cap). Survivorship: 149 futures-only no spot; delisted not enumerable; not survivorship-free.
+
+**How it differs from the spec (if at all):**
+Amendment 1 applied verbatim (stable exclusion, corrected lev rule, listing<2025-06-01 + 92/92, guard+test, throughput plan with monthly spot + concurrent metrics, Stage A/B split, date-means gate construction, NULL_RESULT for <200 trades, 1.40% screen bar). No gate, threshold, strategies/, execution/, risk/, or prior ledger row touched.
+
+**Tests run:**
+`tests/test_oi_positioning_universe.py` 6 passed; `compileall` clean; `git diff --check` clean (CRLF warnings only). Full suite re-run deferred to Step 5 verification.
+
+**Open questions / follow-ups:**
+Stage A download (research+warm-up+embargo) then pre-cost screen; Stage B + Module 1 only if screen passes. No holdout reads yet.
+
