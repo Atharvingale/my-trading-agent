@@ -86,6 +86,8 @@ def _all_jobs() -> list:
 
 def _fetch_one(job: tuple) -> dict:
     """Download one file + CHECKSUM sidecar, verify, store. Returns report."""
+    import urllib.error as _urlerror
+
     kind, url, rel = job
     target = DATA_ROOT / rel
     if target.is_file() and target.stat().st_size > 0:
@@ -108,6 +110,15 @@ def _fetch_one(job: tuple) -> dict:
                 return {"rel": rel, "status": "checksum_mismatch"}
             target.write_bytes(body)
             return {"rel": rel, "status": "ok", "bytes": len(body)}
+        except _urlerror.HTTPError as exc:
+            if int(exc.code) == 404:
+                return {"rel": rel, "status": "absent"}
+            message = repr(exc)
+            if "429" in message or "500" in message or "503" in message:
+                time.sleep(2.0 + attempts * 2.0)
+            else:
+                time.sleep(1.0)
+            attempts = attempts + 1
         except Exception as exc:
             message = repr(exc)
             if "429" in message or "500" in message or "503" in message:
@@ -134,7 +145,7 @@ def run_batch(limit: int = 2000, workers: int = WORKERS) -> dict:
             pending.append(job)
         if len(pending) >= limit:
             break
-    stats = {"total_jobs": len(jobs), "done_before": len(done), "batch": len(pending), "ok": 0, "cached": 0, "failed": 0, "mismatch": 0}
+    stats = {"total_jobs": len(jobs), "done_before": len(done), "batch": len(pending), "ok": 0, "cached": 0, "failed": 0, "mismatch": 0, "absent": 0}
     if len(pending) == 0:
         stats["complete"] = True
         return stats
@@ -150,6 +161,9 @@ def run_batch(limit: int = 2000, workers: int = WORKERS) -> dict:
                 done[job[2]] = {"status": "cached"}
             elif status == "checksum_mismatch":
                 stats["mismatch"] = stats["mismatch"] + 1
+            elif status == "absent":
+                stats["absent"] = stats["absent"] + 1
+                done[job[2]] = {"status": "absent"}
             else:
                 stats["failed"] = stats["failed"] + 1
     CHECKPOINT.write_text(json.dumps(done, indent=1), encoding="utf-8")

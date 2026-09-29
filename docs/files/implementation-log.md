@@ -803,3 +803,24 @@ Amendment 1 applied verbatim (stable exclusion, corrected lev rule, listing<2025
 **Open questions / follow-ups:**
 Stage A download (research+warm-up+embargo) then pre-cost screen; Stage B + Module 1 only if screen passes. No holdout reads yet.
 
+---
+
+### [Cycle 4] oi_positioning_001 CLOSED_PRECOST_SCREEN — 2026-09-29
+
+**What was implemented:**
+- `research/oi_positioning.py` (new): frozen signal (bottom-decile trailing-90, entry D+1 open, exit D+6 open, no re-entry while held), verbatim costs + stressed doubling.
+- `research/oi_cluster_bootstrap.py` (new): entry-date clustering (one obs/date = mean net), percentile bootstrap 10k/seed 20260928.
+- `research/oi_download_stage_a.py` (new, fixed post-commit for 404 handling): Stage A only (metrics 2020-10-03..2025-08-31, spot monthly 2020-10..2025-08, 60 symbols, 111,180 jobs, 8-16 workers, CHECKSUM every file, resumable checkpoint `data/oi_stage_a/checkpoint.json`). Totals: ok 52,862 + cached 2,989 present, absent 55,329 (pre-listing/pre-dataset boundaries), failed 0, mismatch 0. Holdout (≥2025-09-01) never fetched.
+- `research/oi_precost_screen.py` (new): research-only screen (signal D 2021-01-01..2025-05-25, exits ≤2025-05-31, missing never filled).
+- `research/reports/oi_positioning_001_screen.json` (new): trade_count 381, entry_dates 99, mean_gross_per_trade 0.003291 (0.33%), gross cluster CI [-0.02482, 0.02905], fixed 0.0140 → **CLOSED_PRECOST_SCREEN** (gross mean below round-trip fixed cost; high bar for 5-day hold, valid expected outcome).
+- Outcome: holdout NOT consumed, no ledger row, m unchanged (11 HYPOTHESIS, next still 12), Stage B never runs, Steps 4-5 skipped per frozen spec, Step 6 stopping rule applies (last new class regardless).
+
+**How it differs from the spec (if at all):**
+None. Frozen pre-reg unchanged after `448bfb0`. No gate, threshold, strategies/, execution/, risk/, or prior ledger row touched. Downloader 404/absent fix is research plumbing only (no design change).
+
+**Tests run:**
+Full suite 344 passed (338 baseline +6 universe guard tests); `compileall` clean; `git diff --check` clean. `scripts/verify_artifacts.py` passes (ledger still 24 rows, no new rows expected for research-level closure).
+
+**Open questions / follow-ups:**
+None — per Step 6, no further new signal class is proposed, approved, or run. Human decides next.
+
