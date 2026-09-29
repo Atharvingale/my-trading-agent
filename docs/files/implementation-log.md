@@ -822,5 +822,26 @@ None. Frozen pre-reg unchanged after `448bfb0`. No gate, threshold, strategies/,
 Full suite 344 passed (338 baseline +6 universe guard tests); `compileall` clean; `git diff --check` clean. `scripts/verify_artifacts.py` passes (ledger still 24 rows, no new rows expected for research-level closure).
 
 **Open questions / follow-ups:**
-None — per Step 6, no further new signal class is proposed, approved, or run. Human decides next.
+None — per Step 6, no further new signal class is proposed, approved, or run. Human decides next. (Superseded for 4b only: one deliberate 20-day holding-period alternative was human-approved as Cycle 4b; see next entry.)
+
+---
+
+### [Cycle 4b] oi_positioning_20d_001 CLOSED_PRECOST_SCREEN (+ LOW_SAMPLE_SCREEN) — 2026-09-29
+
+**What was implemented:**
+- Pre-reg `research/hypotheses/oi_positioning_20d_001.md` (new id, FROZEN, commit `a93515a`, before any holdout read): 20-trading-day hold (exit D+21 open) is the ONLY change vs 001; lookback stays 90; same universe/method/list, costs (1.40% fixed, TDS per round trip regardless of hold — stated explicitly), windows, cluster bootstrap with NEW seed 20260929, live alpha 0.0041666667 (m=12), holdout minimum 60 trades, 80-entry-cluster informative-screen bar, Step 6 restated (no third hold variant without fresh approval).
+- Parameterized (not duplicated): `research/oi_positioning.py` (`hold_days`/`lookback` params, defaults reproduce 001 bit-for-bit — verified 381/0.003290817094/identical CI/99 dates); `research/oi_precost_screen.py::run` (`hold_days`, `lookback`, `last_signal_day`, `seed`, `hypothesis_id` params). Guard, clustering, downloader reused verbatim; no embargo re-touch, no re-rank, no lookback widening.
+- Stage A REUSED (checkpoint 111,180 jobs: ok 52,862 + cached 2,989, absent 55,329, failed 0, mismatch 0) — not re-downloaded. Screen re-ran on same data with 20d/90/`2025-05-10`/seed 20260929 in minutes.
+- `research/reports/oi_positioning_20d_001_screen.json` (new): 169 trades / 70 entry dates (**LOW_SAMPLE_SCREEN**, 70 < 80 — reported but flagged, not a confident no-go by count alone), mean gross **-0.007678** (-0.77%) vs 0.0140 fixed, CI [-0.04418, 0.08373] → **CLOSED_PRECOST_SCREEN** (mean below cost). Explicit comparison: 001 (5d) was +0.003291; the longer hold did NOT improve gross edge vs fixed cost — genuine signal that holding period is not the fixing lever here.
+- Outcome: holdout NOT consumed (Stage B never ran), no ledger row, m unchanged (11/12-next), Steps 4 skipped. Disk hygiene: parsed audit trail `data/oi_stage_a/parsed_research.json` (39,672 metrics values + 8,350 spot opens, 1,085,544 B, sha256 `2c14bdaa…24611789`, reproduces 20d screen exactly: 169 / -0.007678433311 / 70 dates) + `checkpoint.json` kept; **55,851 raw zips deleted, 615,462,944 B (587.0 MB) freed**.
+- Docs: `docs/results/oi_positioning_20d_001-note.md` (new), Module 1 status line updated (both OI closures noted), this log entry.
+
+**How it differs from the spec (if at all):**
+None. No gate/threshold/strategies/execution/risk/prior-row touch. Disk-hygiene deletion is the task-ordered cleanup (checksums verified first; parsed + checkpoint retained as audit trail).
+
+**Tests run:**
+Full suite 344 passed (338 baseline +6 guard); `compileall` clean; `git diff --check` clean; `verify_artifacts.py` passes (ledger 24 rows, untouched).
+
+**Open questions / follow-ups:**
+None — per Step 6, no third holding-period variant without fresh human approval. Human decides next.
 

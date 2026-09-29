@@ -1,0 +1,21 @@
+{
+  "bootstrap_samples": 10000,
+  "bootstrap_seed": 20260929,
+  "decision": "CLOSED_PRECOST_SCREEN",
+  "entry_date_count": 70,
+  "gross_cluster_ci": [
+    -0.044177219018329036,
+    0.08372517126872342
+  ],
+  "hold_days": 20,
+  "hypothesis_id": "oi_positioning_20d_001",
+  "lookback": 90,
+  "mean_gross_per_trade": -0.007678433311205816,
+  "round_trip_fixed_cost": 0.014,
+  "trade_count": 169,
+  "universe_size": 60,
+  "window": [
+    "2021-01-01",
+    "2025-05-31"
+  ]
+}
