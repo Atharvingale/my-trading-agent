@@ -1,5 +1,7 @@
 # Module Status Tracker
 
+**Project status (2026-09-29): Research concluded — no production strategy approved; infrastructure complete and reusable. See `research/PROJECT_FINDING.md`.**
+
 Update this table whenever work starts or finishes on a module. Keep it in sync with `implementation-log.md` — this file is the at-a-glance summary, the log is the detailed record.
 
 | # | Module | File | Status | Last updated |

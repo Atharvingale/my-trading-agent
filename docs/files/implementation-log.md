@@ -845,3 +845,21 @@ Full suite 344 passed (338 baseline +6 guard); `compileall` clean; `git diff --c
 **Open questions / follow-ups:**
 None — per Step 6, no third holding-period variant without fresh human approval. Human decides next.
 
+---
+
+### [Close-out] Final verification bundle + PROJECT_FINDING — 2026-09-29
+
+**What was implemented:**
+- Part A verification (single pass, starting commit `c0a2280`, tree clean): `verify_artifacts.py` PASS; full suite 344 passed (baseline 344, no drop); `compileall` + `git diff --check` clean; ledger 24 rows (11 HYPOTHESIS each with exactly 1 RESULT + 2 seeded FAILs, m=11); all 4 closures consistent (`d1_d3` + `liquidation_intensity` CLOSED_UNAVAILABLE with m unchanged; both OI screens CLOSED_PRECOST_SCREEN with exact numbers); menu 4 classes (2 `INITIAL_APPROVED` in code + 2 DB-approved with rationale); `git log -- strategies/ execution/ risk/` shows only scaffolding commits, `strategies/` holds no `<strategy>.py` files (zero wired); `docs/results/` 4 files tracked, none ignored, verify floors match reality.
+- Part B: rewrote `research/PROJECT_FINDING.md` as the stand-alone program close-out (supersedes the 2026-09-24 seven-experiment version; old figures preserved with provenance notes, incl. Phase 0b carried-as-stated and F4/cross-sectional compounding scope).
+- Part C: marked `docs/files/module-status.md` research-concluded (note: task named `docs/module-status.md`, which does not exist; canonical file is `docs/files/module-status.md`); this log entry; single commit; post-commit re-verify.
+
+**How it differs from the spec (if at all):**
+No hypothesis, holdout, or ledger row; no change under `strategies/`, `execution/`, `risk/`, or Module 4-8. `verify_artifacts.py` file list left unchanged (PROJECT_FINDING.md is git-tracked and committed; the script's durability floors still pass as-is).
+
+**Tests run:**
+Full suite 344 passed; `compileall` clean; `git diff --check` clean; `verify_artifacts.py` passes pre- and post-commit.
+
+**Open questions / follow-ups:**
+None — program closed unless a human explicitly reopens it.
+
