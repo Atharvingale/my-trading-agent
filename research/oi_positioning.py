@@ -1,9 +1,12 @@
-"""OI positioning engine (Module 1 research, frozen oi_positioning_001).
+"""OI positioning engine (Module 1 research, oi_positioning_001 + 20d variant).
 
 Why this file exists: implements the frozen long-only bottom-decile
 top-trader-positions contrarian over the pre-registered 60-symbol spot
 universe. Signal uses futures metrics daily 23:55 UTC values; trades price
 on spot daily OPENs. Costs reuse the exact project stack verbatim.
+Holding period and lookback are parameters (defaults reproduce
+oi_positioning_001 exactly: 5-day hold, 90-day lookback); the 20-day
+variant passes hold_days=20 with lookback unchanged at 90.
 """
 
 from __future__ import annotations
@@ -82,11 +85,12 @@ def dataset_hash(days: list) -> str:
     return hashlib.sha256(json.dumps(ordered, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
-def signal_dates(values_by_day: dict) -> list:
-    """Bottom-decile dates: value rank <=10% among prior 90 days only.
+def signal_dates(values_by_day: dict, lookback: int = LOOKBACK_DAYS) -> list:
+    """Bottom-decile dates: value rank <=10% among prior lookback days only.
 
     Why strict exclusion: D's own value never enters its percentile;
-    90 prior days required, else ineligible. No look-ahead.
+    lookback prior days required, else ineligible. No look-ahead.
+    Default lookback reproduces oi_positioning_001 exactly.
     """
     days: list = []
     for day in values_by_day:
@@ -103,12 +107,13 @@ def signal_dates(values_by_day: dict) -> list:
             index = index + 1
         if placed is False:
             ordered_days.append(day)
+    look = int(lookback)
     fired: list = []
-    index = LOOKBACK_DAYS
+    index = look
     while index < len(ordered_days):
         day = ordered_days[index]
         window: list = []
-        k = index - LOOKBACK_DAYS
+        k = index - look
         while k < index:
             window.append(values_by_day[ordered_days[k]])
             k = k + 1
@@ -118,15 +123,15 @@ def signal_dates(values_by_day: dict) -> list:
             if past <= current:
                 below_or_equal = below_or_equal + 1
         # Percentile = rank among priors; bottom decile fires.
-        # rank = (# priors <= current) / 90; current smallest -> 1/90.
-        rank = float(below_or_equal) / float(LOOKBACK_DAYS)
+        # rank = (# priors <= current) / look; current smallest -> 1/look.
+        rank = float(below_or_equal) / float(look)
         # Count strictly smaller for tie handling: fire when at most 9
         # priors are strictly below (equivalent to <=0.10 with tie guard).
         strictly_below = 0
         for past in window:
             if past < current:
                 strictly_below = strictly_below + 1
-        if float(strictly_below + 1) / float(LOOKBACK_DAYS + 1) <= PERCENTILE_THRESHOLD + 1e-12:
+        if float(strictly_below + 1) / float(look + 1) <= PERCENTILE_THRESHOLD + 1e-12:
             fired.append(day)
         index = index + 1
     return fired
@@ -150,16 +155,21 @@ def generate_trades(
     *,
     notional: float = 1000.0,
     stressed: bool = False,
+    hold_days: int = HOLD_DAYS,
+    lookback: int = LOOKBACK_DAYS,
 ) -> list:
-    """One 5-day spot long per signal; no re-entry while held.
+    """One spot long per signal; no re-entry while held.
 
-    Entry at D+1 spot OPEN, exit at D+6 spot OPEN (5 days after entry).
+    Entry at D+1 spot OPEN, exit at D+1+hold_days spot OPEN (hold_days
+    after entry; 5-day default exits D+6, 20-day exits D+21).
     Missing opens invalidate that signal (never filled).
+    Default hold/lookback reproduce oi_positioning_001 exactly.
     """
     trades: list = []
+    hold = int(hold_days)
     for symbol in universe:
         values = metrics_by_symbol.get(symbol, {})
-        fired = signal_dates(values)
+        fired = signal_dates(values, lookback=lookback)
         held_until = ""
         for day in fired:
             if day < first_signal_day or day > last_signal_day:
@@ -167,7 +177,7 @@ def generate_trades(
             if held_until != "" and day <= held_until:
                 continue
             entry_day = add_days(day, 1)
-            exit_day = add_days(day, 6)
+            exit_day = add_days(day, 1 + hold)
             entry = opens_by_symbol_day.get(symbol, {}).get(entry_day, None)
             exit_price = opens_by_symbol_day.get(symbol, {}).get(exit_day, None)
             if entry is None or exit_price is None:

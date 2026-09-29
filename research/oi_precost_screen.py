@@ -1,4 +1,4 @@
-"""Pre-cost screen for oi_positioning_001 (research window only).
+"""Pre-cost screen for oi_positioning_001 and 20-day variant (research only).
 
 Why this file exists: Step 3 go/no-go on the frozen spec. Computes trade
 count, mean GROSS return per trade, and the date-cluster bootstrap CI of
@@ -6,6 +6,8 @@ the gross mean on 2021-01-01..2025-05-31 only. Compares against the
 per-round-trip fixed cost 0.0140. Below it (or CI upper below it) closes
 as CLOSED_PRECOST_SCREEN with no ledger row and no holdout consumption.
 No parameter is tuned here; any change would be a new hypothesis.
+Defaults reproduce oi_positioning_001 exactly (5-day hold, seed 20260928);
+the 20-day variant passes hold_days=20, last_signal 2025-05-10, new seed.
 """
 
 from __future__ import annotations
@@ -99,7 +101,16 @@ def _load_spot_opens(universe: list) -> dict:
     return opens
 
 
-def run(universe: list, out_path: str = "research/reports/oi_positioning_001_screen.json") -> dict:
+def run(
+    universe: list,
+    out_path: str = "research/reports/oi_positioning_001_screen.json",
+    *,
+    hold_days: int = 5,
+    lookback: int = 90,
+    last_signal_day: str = RESEARCH_LAST_SIGNAL,
+    seed: int = 20260928,
+    hypothesis_id: str = "oi_positioning_001",
+) -> dict:
     """Execute the research-only screen; writes the JSON record."""
     import datetime as _dt
 
@@ -123,9 +134,11 @@ def run(universe: list, out_path: str = "research/reports/oi_positioning_001_scr
         opens,
         list(universe),
         RESEARCH_FIRST,
-        RESEARCH_LAST_SIGNAL,
+        last_signal_day,
         notional=1000.0,
         stressed=False,
+        hold_days=hold_days,
+        lookback=lookback,
     )
     trade_count = len(trades)
     gross_fracs: list = []
@@ -155,22 +168,24 @@ def run(universe: list, out_path: str = "research/reports/oi_positioning_001_scr
         for value in gross_fracs:
             total_gross = total_gross + float(value)
         mean_gross = total_gross / float(len(gross_fracs))
-        ci = cluster.bootstrap_ci(gross_means, seed=20260928, samples=10000)
+        ci = cluster.bootstrap_ci(gross_means, seed=seed, samples=10000)
     entry_dates = len(by_date)
     decision = "GO"
     if trade_count == 0 or mean_gross < FIXED_COST or ci[1] < FIXED_COST:
         decision = "CLOSED_PRECOST_SCREEN"
     record = {
-        "hypothesis_id": engine.HYPOTHESIS_ID,
+        "hypothesis_id": hypothesis_id,
         "window": ["2021-01-01", "2025-05-31"],
         "universe_size": len(universe),
+        "hold_days": int(hold_days),
+        "lookback": int(lookback),
         "trade_count": trade_count,
         "entry_date_count": entry_dates,
         "mean_gross_per_trade": mean_gross,
         "gross_cluster_ci": [ci[0], ci[1]],
         "round_trip_fixed_cost": FIXED_COST,
         "decision": decision,
-        "bootstrap_seed": 20260928,
+        "bootstrap_seed": int(seed),
         "bootstrap_samples": 10000,
     }
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
